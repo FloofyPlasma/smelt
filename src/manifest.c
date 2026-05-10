@@ -1,5 +1,5 @@
 #include "manifest.h"
-#include "../vendor/tomlc17.h"
+#include "tomlc17.h"
 #include <stdio.h>
 #include <string.h>
 
