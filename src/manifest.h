@@ -6,6 +6,7 @@
 #define MAX_PATH 1024
 #define MAX_DEPS 64
 #define MAX_EXTRA 16
+#define MAX_INCLUDES 32
 
 typedef struct {
   char name[MAX_NAME];
@@ -23,6 +24,8 @@ typedef struct {
   int dep_count;
   char extra_sources[MAX_EXTRA][MAX_PATH];
   int extra_count;
+  char include_dirs[MAX_INCLUDES][MAX_PATH];
+  int include_count;
 } Manifest;
 
 int manifest_load(const char *path, Manifest *out);
