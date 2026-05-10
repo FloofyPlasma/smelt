@@ -1,0 +1,4 @@
+smelt
+build/
+*.o
+*.d
