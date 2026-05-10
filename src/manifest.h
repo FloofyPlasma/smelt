@@ -8,6 +8,7 @@
 #define MAX_EXTRA 16
 #define MAX_INCLUDES 32
 #define MAX_PROFILE_FLAGS 32
+#define MAX_LINK_FLAGS 32
 
 typedef struct {
   char name[MAX_NAME];
@@ -34,6 +35,8 @@ typedef struct {
   int include_count;
   Profile debug;
   Profile release;
+  char link_flags[MAX_LINK_FLAGS][MAX_STR];
+  int link_flag_count;
 } Manifest;
 
 int manifest_load(const char *path, Manifest *out);

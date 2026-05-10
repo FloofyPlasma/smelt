@@ -261,6 +261,9 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     for (int i = 0; i < m->extra_count; i++)
       pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->extra_sources[i]);
 
+    for (int i = 0; i < m->link_flag_count; i++)
+      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->link_flags[i]);
+
     pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -o %s", output);
     printf("smelt: %s\n", cmd);
 
