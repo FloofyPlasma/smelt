@@ -1,4 +1,6 @@
 #include "build.h"
+#include "clean.h"
+#include "init.h"
 #include "manifest.h"
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +44,17 @@ int main(int argc, char **argv) {
     execv(output, child_args);
     perror("smelt: execv failed");
     return 1;
+  }
+
+  if (strcmp(argv[1], "clean") == 0) {
+    Manifest m = {0};
+    if (!manifest_load("smelt.toml", &m))
+      return 1;
+    return clean_run(&m) ? 0 : 1;
+  }
+
+  if (strcmp(argv[1], "init") == 0) {
+    return init_run() ? 0 : 1;
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);
