@@ -8,9 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#define MAX_CMD 8192
+#define MAX_CMD 16384
 
 static int ends_with_c(const char *name) {
   size_t len = strlen(name);
@@ -29,7 +30,7 @@ static int scan_dir(BuildCtx *ctx, const char *dir) {
   struct dirent *entry;
   while ((entry = readdir(d)) != NULL) {
     if (entry->d_name[0] == '.')
-      continue; // skip . .. .git etc
+      continue;
 
     char path[MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
@@ -80,9 +81,8 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
   base = base ? base + 1 : src;
   snprintf(dfile, sizeof(dfile), "%s/%s", obj_dir, base);
   size_t dlen = strlen(dfile);
-  if (dlen > 2) {
+  if (dlen > 2)
     dfile[dlen - 1] = 'd';
-  }
 
   FILE *df = fopen(dfile, "r");
   if (df) {
@@ -169,45 +169,76 @@ int build_run(const Manifest *m, BuildCtx *ctx_out) {
   if (flags_changed)
     printf("smelt: flags or compiler changed, full rebuild\n");
 
-  int any_compiled = 0;
   char obj_files[MAX_SOURCES][MAX_OBJ_PATH];
+  char new_hashes[MAX_SOURCES][MAX_HASH];
+  int needs_compile[MAX_SOURCES];
 
   for (int i = 0; i < ctx.source_count; i++) {
     const char *src = ctx.sources[i];
 
     const char *base = strrchr(src, '/');
     base = base ? base + 1 : src;
-    char obj[MAX_OBJ_PATH];
-    snprintf(obj, sizeof(obj), "%s/%s", m->out_dir, base);
-    size_t olen = strlen(obj);
+    snprintf(obj_files[i], MAX_OBJ_PATH, "%s/%s", m->out_dir, base);
+    size_t olen = strlen(obj_files[i]);
     if (olen > 2)
-      obj[olen - 1] = 'o';
-    snprintf(obj_files[i], MAX_OBJ_PATH, "%s", obj);
+      obj_files[i][olen - 1] = 'o';
 
-    char new_hash[MAX_HASH] = {0};
-    hash_source_and_deps(src, m->out_dir, flags, new_hash, sizeof(new_hash));
+    new_hashes[i][0] = '\0';
+    hash_source_and_deps(src, m->out_dir, flags, new_hashes[i], MAX_HASH);
 
     const char *old_hash = cache_get(&cache, src);
-    int changed = flags_changed || !old_hash || strcmp(old_hash, new_hash) != 0;
+    needs_compile[i] =
+        flags_changed || !old_hash || strcmp(old_hash, new_hashes[i]) != 0;
+  }
 
-    if (!changed) {
-      printf("smelt: skip %s (unchanged)\n", src);
+  pid_t pids[MAX_SOURCES] = {0};
+  int any_compiled = 0;
+
+  for (int i = 0; i < ctx.source_count; i++) {
+    if (!needs_compile[i]) {
+      printf("smelt: skip %s (unchanged)\n", ctx.sources[i]);
       continue;
     }
 
-    char cmd[MAX_CMD * 2] = {0};
+    char cmd[MAX_CMD] = {0};
     snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, flags,
-             src, obj);
+             ctx.sources[i], obj_files[i]);
     printf("smelt: %s\n", cmd);
 
-    if (system(cmd) != 0) {
-      fprintf(stderr, "smelt: compile failed: %s\n", src);
+    pid_t pid = fork();
+    if (pid < 0) {
+      perror("smelt: fork");
       return 0;
     }
-
-    hash_source_and_deps(src, m->out_dir, flags, new_hash, sizeof(new_hash));
-    cache_set(&cache, src, new_hash);
+    if (pid == 0) {
+      execl("/bin/sh", "sh", "-c", cmd, NULL);
+      _exit(1);
+    }
+    pids[i] = pid;
     any_compiled = 1;
+  }
+
+  int build_ok = 1;
+  for (int i = 0; i < ctx.source_count; i++) {
+    if (pids[i] == 0)
+      continue;
+    int status;
+    waitpid(pids[i], &status, 0);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      fprintf(stderr, "smelt: compile failed: %s\n", ctx.sources[i]);
+      build_ok = 0;
+    }
+  }
+  if (!build_ok)
+    return 0;
+
+  for (int i = 0; i < ctx.source_count; i++) {
+    if (!needs_compile[i])
+      continue;
+    char final_hash[MAX_HASH] = {0};
+    hash_source_and_deps(ctx.sources[i], m->out_dir, flags, final_hash,
+                         MAX_HASH);
+    cache_set(&cache, ctx.sources[i], final_hash);
   }
 
   char output[MAX_PATH * 2];
