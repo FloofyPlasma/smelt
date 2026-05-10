@@ -120,7 +120,7 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
   return 1;
 }
 
-int build_run(const Manifest *m, BuildCtx *ctx_out) {
+int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   BuildCtx ctx = {0};
 
   const char *cc = getenv("CC");
@@ -147,6 +147,12 @@ int build_run(const Manifest *m, BuildCtx *ctx_out) {
   for (int i = 0; i < m->include_count; i++)
     fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-I%s ",
                      m->include_dirs[i]);
+  const Profile *prof =
+      ((strcmp(profile, "release") == 0) ? &m->release : &m->debug);
+  for (int i = 0; i < prof->flag_count; i++)
+    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "%s ", prof->flags[i]);
+
+  printf("smelt: profile=%s\n", profile);
 
   char ver_cmd[MAX_PATH + 64];
   snprintf(ver_cmd, sizeof(ver_cmd), "%s --version 2>&1 | head -1",

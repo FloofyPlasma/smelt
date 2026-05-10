@@ -7,11 +7,17 @@
 #define MAX_DEPS 64
 #define MAX_EXTRA 16
 #define MAX_INCLUDES 32
+#define MAX_PROFILE_FLAGS 32
 
 typedef struct {
   char name[MAX_NAME];
   char version[MAX_STR];
 } Dep;
+
+typedef struct {
+  char flags[MAX_PROFILE_FLAGS][MAX_STR];
+  int flag_count;
+} Profile;
 
 typedef struct {
   char name[MAX_NAME];
@@ -26,6 +32,8 @@ typedef struct {
   int extra_count;
   char include_dirs[MAX_INCLUDES][MAX_PATH];
   int include_count;
+  Profile debug;
+  Profile release;
 } Manifest;
 
 int manifest_load(const char *path, Manifest *out);

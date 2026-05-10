@@ -9,3 +9,9 @@ src_dir = "src"
 out_dir = "build"
 include_dirs = ["src", "vendor"]
 extra_sources = ["vendor/tomlc17.c", "vendor/xxhash.c"]
+
+[profile.debug]
+flags = ["-g", "-O0"]
+
+[profile.release]
+flags = ["-O3", "-DNDEBUG"]

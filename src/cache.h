@@ -7,7 +7,7 @@
 #define MAX_HASH 65
 
 typedef struct {
-  char source[MAX_PATH];
+  char source[MAX_PATH * 2];
   char hash[MAX_HASH];
 } CacheEntry;
 

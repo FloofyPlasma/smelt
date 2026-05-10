@@ -7,6 +7,17 @@ static void scopy(char *dst, size_t dstsz, const char *src) {
   snprintf(dst, dstsz, "%s", src);
 }
 
+static void parse_profile(toml_datum_t root, const char *key, Profile *out) {
+  toml_datum_t arr = toml_seek(root, key);
+  if (arr.type != TOML_ARRAY)
+    return;
+  for (int i = 0; i < arr.u.arr.size && i < MAX_PROFILE_FLAGS; i++) {
+    toml_datum_t e = arr.u.arr.elem[i];
+    if (e.type == TOML_STRING)
+      scopy(out->flags[out->flag_count++], sizeof(out->flags[0]), e.u.s);
+  }
+}
+
 int manifest_load(const char *path, Manifest *out) {
   *out = (Manifest){0};
 
@@ -62,6 +73,20 @@ int manifest_load(const char *path, Manifest *out) {
     scopy(out->src_dir, sizeof(out->src_dir), "src");
   if (out->out_dir[0] == '\0')
     scopy(out->out_dir, sizeof(out->out_dir), "build");
+
+  parse_profile(t, "profile.debug.flags", &out->debug);
+  parse_profile(t, "profile.release.flags", &out->release);
+
+  if (out->debug.flag_count == 0) {
+    scopy(out->debug.flags[0], MAX_STR, "-g");
+    scopy(out->debug.flags[1], MAX_STR, "-O0");
+    out->debug.flag_count = 2;
+  }
+  if (out->release.flag_count == 0) {
+    scopy(out->release.flags[0], MAX_STR, "-O3");
+    scopy(out->release.flags[1], MAX_STR, "-DNDEBUG");
+    out->release.flag_count = 2;
+  }
 
   toml_free(result);
   return 1;

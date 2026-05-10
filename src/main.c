@@ -16,21 +16,27 @@ int main(int argc, char **argv) {
   }
 
   if (strcmp(argv[1], "build") == 0) {
+    const char *profile = "debug";
+    if (argc >= 3 && strcmp(argv[2], "release") == 0)
+      profile = argv[2];
     Manifest m = {0};
     BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!build_run(&m, &ctx))
+    if (!build_run(&m, &ctx, profile))
       return 1;
     compdb_write(&m, &ctx);
     return 0;
   }
 
   if (strcmp(argv[1], "run") == 0) {
+    const char *profile = "debug";
+    if (argc >= 3 && strcmp(argv[2], "release") == 0)
+      profile = argv[2];
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!build_run(&m, NULL))
+    if (!build_run(&m, NULL, profile))
       return 1;
 
     char output[MAX_PATH * 2];
