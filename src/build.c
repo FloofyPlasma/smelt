@@ -1,5 +1,8 @@
+#define _POSIX_C_SOURCE 200809L
 #include "build.h"
+#include "cache.h"
 #include "manifest.h"
+#include "xxhash.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,10 +11,6 @@
 #include <unistd.h>
 
 #define MAX_CMD 8192
-
-static void path_join(char *dst, size_t dstsz, const char *a, const char *b) {
-  snprintf(dst, dstsz, "%s/%s", a, b);
-}
 
 static int ends_with_c(const char *name) {
   size_t len = strlen(name);
@@ -58,16 +57,77 @@ static int scan_dir(BuildCtx *ctx, const char *dir) {
 
 static void ensure_dir(const char *path) { mkdir(path, 0755); }
 
-int build_run(const Manifest *m, BuildCtx *ctx_cout) {
+static int hash_source_and_deps(const char *src, const char *obj_dir,
+                                const char *flags, char *out, size_t outsz) {
+  XXH3_state_t *state = XXH3_createState();
+  XXH3_64bits_reset(state);
+
+  XXH3_64bits_update(state, flags, strlen(flags));
+
+  FILE *fp = fopen(src, "rb");
+  if (!fp) {
+    XXH3_freeState(state);
+    return 0;
+  }
+  unsigned char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
+    XXH3_64bits_update(state, buf, n);
+  fclose(fp);
+
+  char dfile[MAX_PATH];
+  const char *base = strrchr(src, '/');
+  base = base ? base + 1 : src;
+  snprintf(dfile, sizeof(dfile), "%s/%s", obj_dir, base);
+  size_t dlen = strlen(dfile);
+  if (dlen > 2) {
+    dfile[dlen - 1] = 'd';
+  }
+
+  FILE *df = fopen(dfile, "r");
+  if (df) {
+    char line[4096];
+    while (fgets(line, sizeof(line), df)) {
+      char *p = line;
+      while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\\' || *p == '\n')
+          p++;
+        if (!*p)
+          break;
+        char token[MAX_PATH];
+        int ti = 0;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\\' && *p != '\n')
+          token[ti++] = *p++;
+        token[ti] = '\0';
+        if (ti == 0 || token[ti - 1] == ':')
+          continue;
+        if (strcmp(token, src) == 0)
+          continue;
+        FILE *hf = fopen(token, "rb");
+        if (hf) {
+          while ((n = fread(buf, 1, sizeof(buf), hf)) > 0)
+            XXH3_64bits_update(state, buf, n);
+          fclose(hf);
+        }
+      }
+    }
+    fclose(df);
+  }
+
+  XXH64_hash_t hash = XXH3_64bits_digest(state);
+  XXH3_freeState(state);
+  snprintf(out, outsz, "%016llx", (unsigned long long)hash);
+  return 1;
+}
+
+int build_run(const Manifest *m, BuildCtx *ctx_out) {
   BuildCtx ctx = {0};
 
-  // get compiler
   const char *cc = getenv("CC");
   if (!cc || cc[0] == '\0')
     cc = "gcc";
   snprintf(ctx.compiler, sizeof(ctx.compiler), "%s", cc);
 
-  // scan sources
   if (!scan_dir(&ctx, m->src_dir))
     return 0;
   if (ctx.source_count == 0) {
@@ -77,43 +137,110 @@ int build_run(const Manifest *m, BuildCtx *ctx_cout) {
 
   ensure_dir(m->out_dir);
 
-  char output[MAX_PATH];
-  path_join(output, sizeof(output), m->out_dir, m->name);
-
-  char cmd[MAX_CMD] = {0};
-  int pos = 0;
-
-  pos += snprintf(cmd + pos, sizeof(cmd) - pos, "%s", ctx.compiler);
-
+  char flags[4096] = {0};
+  int fpos = 0;
   if (m->c_standard[0])
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -std=%s", m->c_standard);
-
+    fpos +=
+        snprintf(flags + fpos, sizeof(flags) - fpos, "-std=%s ", m->c_standard);
   if (strcmp(m->warnings, "all") == 0)
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -Wall -Wextra");
-
-  for (int i = 0; i < ctx.source_count; i++)
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", ctx.sources[i]);
-
-  // extra sources
-  for (int i = 0; i < m->extra_count; i++)
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->extra_sources[i]);
-
-  // include dirs :3
+    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-Wall -Wextra ");
   for (int i = 0; i < m->include_count; i++)
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -I%s", m->include_dirs[i]);
+    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-I%s ",
+                     m->include_dirs[i]);
 
-  pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -o %s", output);
+  char ver_cmd[MAX_PATH + 64];
+  snprintf(ver_cmd, sizeof(ver_cmd), "%s --version 2>&1 | head -1",
+           ctx.compiler);
+  char compiler_ver[256] = {0};
+  FILE *vp = popen(ver_cmd, "r");
+  if (vp) {
+    fgets(compiler_ver, sizeof(compiler_ver), vp);
+    pclose(vp);
+  }
+  compiler_ver[strcspn(compiler_ver, "\n")] = '\0';
 
-  printf("smelt: %s\n", cmd);
+  BuildCache cache;
+  cache_load(&cache);
 
-  int ret = system(cmd);
-  if (ret != 0) {
-    fprintf(stderr, "smelt: build failed\n");
-    return 0;
+  char flags_hash[MAX_HASH];
+  cache_hash_str(flags, flags_hash, sizeof(flags_hash));
+  int flags_changed = strcmp(flags_hash, cache.flags_hash) != 0 ||
+                      strcmp(compiler_ver, cache.compiler_ver) != 0;
+  if (flags_changed)
+    printf("smelt: flags or compiler changed, full rebuild\n");
+
+  int any_compiled = 0;
+  char obj_files[MAX_SOURCES][MAX_OBJ_PATH];
+
+  for (int i = 0; i < ctx.source_count; i++) {
+    const char *src = ctx.sources[i];
+
+    const char *base = strrchr(src, '/');
+    base = base ? base + 1 : src;
+    char obj[MAX_OBJ_PATH];
+    snprintf(obj, sizeof(obj), "%s/%s", m->out_dir, base);
+    size_t olen = strlen(obj);
+    if (olen > 2)
+      obj[olen - 1] = 'o';
+    snprintf(obj_files[i], MAX_OBJ_PATH, "%s", obj);
+
+    char new_hash[MAX_HASH] = {0};
+    hash_source_and_deps(src, m->out_dir, flags, new_hash, sizeof(new_hash));
+
+    const char *old_hash = cache_get(&cache, src);
+    int changed = flags_changed || !old_hash || strcmp(old_hash, new_hash) != 0;
+
+    if (!changed) {
+      printf("smelt: skip %s (unchanged)\n", src);
+      continue;
+    }
+
+    char cmd[MAX_CMD * 2] = {0};
+    snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, flags,
+             src, obj);
+    printf("smelt: %s\n", cmd);
+
+    if (system(cmd) != 0) {
+      fprintf(stderr, "smelt: compile failed: %s\n", src);
+      return 0;
+    }
+
+    hash_source_and_deps(src, m->out_dir, flags, new_hash, sizeof(new_hash));
+    cache_set(&cache, src, new_hash);
+    any_compiled = 1;
   }
 
-  if (ctx_cout)
-    *ctx_cout = ctx;
-  printf("smelt: built %s\n", output);
+  char output[MAX_PATH * 2];
+  snprintf(output, sizeof(output), "%s/%s", m->out_dir, m->name);
+
+  if (any_compiled || flags_changed) {
+    char cmd[MAX_CMD] = {0};
+    int pos = 0;
+    pos += snprintf(cmd + pos, sizeof(cmd) - pos, "%s", ctx.compiler);
+
+    for (int i = 0; i < ctx.source_count; i++)
+      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", obj_files[i]);
+
+    for (int i = 0; i < m->extra_count; i++)
+      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->extra_sources[i]);
+
+    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -o %s", output);
+    printf("smelt: %s\n", cmd);
+
+    if (system(cmd) != 0) {
+      fprintf(stderr, "smelt: link failed\n");
+      return 0;
+    }
+    printf("smelt: built %s\n", output);
+  } else {
+    printf("smelt: nothing to build\n");
+  }
+
+  snprintf(cache.flags_hash, sizeof(cache.flags_hash), "%s", flags_hash);
+  snprintf(cache.compiler_ver, sizeof(cache.compiler_ver), "%s", compiler_ver);
+  cache_save(&cache);
+
+  if (ctx_out)
+    *ctx_out = ctx;
   return 1;
 }

@@ -8,4 +8,4 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 include_dirs = ["src", "vendor"]
-extra_sources = ["vendor/tomlc17.c"]
+extra_sources = ["vendor/tomlc17.c", "vendor/xxhash.c"]

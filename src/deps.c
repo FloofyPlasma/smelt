@@ -72,7 +72,7 @@ static const char *base_name(const char *path) {
   return s ? s + 1 : path;
 }
 
-static int toml_has_value(const char *section_key, const char *value) {
+static int toml_has_value(const char *value) {
   FILE *fp = fopen("smelt.toml", "r");
   if (!fp)
     return 0;
@@ -90,7 +90,7 @@ static int toml_has_value(const char *section_key, const char *value) {
 }
 
 static int toml_append_array(const char *key, const char *value) {
-  if (toml_has_value(key, value)) {
+  if (toml_has_value(value)) {
     printf("smelt: %s already has %s\n", key, value);
     return 1;
   }

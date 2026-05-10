@@ -4,6 +4,7 @@
 #include "manifest.h"
 
 #define MAX_SOURCES 512
+#define MAX_OBJ_PATH (MAX_PATH * 2)
 
 typedef struct {
   char compiler[MAX_PATH];
