@@ -45,6 +45,7 @@ int manifest_load(const char *path, Manifest *out) {
   toml_datum_t incs = toml_seek(t, "build.include_dirs");
   toml_datum_t extras = toml_seek(t, "build.extra_sources");
   toml_datum_t lflags = toml_seek(t, "build.link_flags");
+  toml_datum_t defs = toml_seek(t, "build.defines");
   if (std.type == TOML_STRING)
     scopy(out->c_standard, sizeof(out->c_standard), std.u.s);
   if (warn.type == TOML_STRING)
@@ -70,11 +71,19 @@ int manifest_load(const char *path, Manifest *out) {
     }
   }
   if (lflags.type == TOML_ARRAY) {
-    for (int i = 0; i < extras.u.arr.size && i < MAX_LINK_FLAGS; i++) {
+    for (int i = 0; i < lflags.u.arr.size && i < MAX_LINK_FLAGS; i++) {
       toml_datum_t e = lflags.u.arr.elem[i];
       if (e.type == TOML_STRING)
         scopy(out->link_flags[out->link_flag_count++],
               sizeof(out->link_flags[0]), e.u.s);
+    }
+  }
+  if (defs.type == TOML_ARRAY) {
+    for (int i = 0; i < defs.u.arr.size && i < MAX_DEFINES; i++) {
+      toml_datum_t e = defs.u.arr.elem[i];
+      if (e.type == TOML_STRING)
+        scopy(out->defines[out->define_count++], sizeof(out->defines[0]),
+              e.u.s);
     }
   }
 

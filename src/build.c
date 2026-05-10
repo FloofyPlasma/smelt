@@ -147,6 +147,9 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   for (int i = 0; i < m->include_count; i++)
     fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-I%s ",
                      m->include_dirs[i]);
+  for (int i = 0; i < m->define_count; i++)
+    fpos +=
+        snprintf(flags + fpos, sizeof(flags) - fpos, "-D%s ", m->defines[i]);
   const Profile *prof =
       ((strcmp(profile, "release") == 0) ? &m->release : &m->debug);
   for (int i = 0; i < prof->flag_count; i++)

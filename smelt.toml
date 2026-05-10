@@ -8,6 +8,7 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 link_flags = ["-lm"]
+defines = ["VERSION=\"0.1.0\""]
 include_dirs = ["src", "vendor"]
 extra_sources = ["vendor/tomlc17.c", "vendor/xxhash.c"]
 
