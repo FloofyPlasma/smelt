@@ -1,6 +1,7 @@
 #include "build.h"
 #include "clean.h"
 #include "compdb.h"
+#include "deps.h"
 #include "init.h"
 #include "manifest.h"
 #include <stdio.h>
@@ -10,7 +11,7 @@
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "usage: smelt <command>\n");
-    fprintf(stderr, "commands: build, run\n");
+    fprintf(stderr, "commands: build, run, clean, init, add\n");
     return 1;
   }
 
@@ -58,6 +59,17 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1], "init") == 0) {
     return init_run() ? 0 : 1;
+  }
+
+  if (strcmp(argv[1], "add") == 0) {
+    if (argc < 3) {
+      fprintf(stderr, "usage: smelt add <git-url> [file1 file2 ...]\n");
+      return 1;
+    }
+    const char *url = argv[2];
+    const char **files = (const char **)&argv[3];
+    int file_count = argc - 3;
+    return dep_fetch(url, files, file_count) ? 0 : 1;
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);
