@@ -42,7 +42,7 @@ int manifest_load(const char *path, Manifest *out) {
   if (odir.type == TOML_STRING)
     scopy(out->out_dir, sizeof(out->out_dir), odir.u.s);
   if (incs.type == TOML_ARRAY) {
-    for (int i = 1; i < incs.u.arr.size && i < MAX_INCLUDES; i++) {
+    for (int i = 0; i < incs.u.arr.size && i < MAX_INCLUDES; i++) {
       toml_datum_t e = incs.u.arr.elem[i];
       if (e.type == TOML_STRING)
         scopy(out->include_dirs[out->include_count++],
