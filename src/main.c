@@ -1,5 +1,6 @@
 #include "build.h"
 #include "clean.h"
+#include "compdb.h"
 #include "init.h"
 #include "manifest.h"
 #include <stdio.h>
@@ -15,10 +16,12 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1], "build") == 0) {
     Manifest m = {0};
+    BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!build_run(&m))
+    if (!build_run(&m, &ctx))
       return 1;
+    compdb_write(&m, &ctx);
     return 0;
   }
 
@@ -26,7 +29,7 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!build_run(&m))
+    if (!build_run(&m, NULL))
       return 1;
 
     char output[MAX_PATH * 2];

@@ -11,6 +11,6 @@ typedef struct {
   int source_count;
 } BuildCtx;
 
-int build_run(const Manifest *m);
+int build_run(const Manifest *m, BuildCtx *ctx_cout);
 
 #endif

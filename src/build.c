@@ -58,7 +58,7 @@ static int scan_dir(BuildCtx *ctx, const char *dir) {
 
 static void ensure_dir(const char *path) { mkdir(path, 0755); }
 
-int build_run(const Manifest *m) {
+int build_run(const Manifest *m, BuildCtx *ctx_cout) {
   BuildCtx ctx = {0};
 
   // get compiler
@@ -112,6 +112,8 @@ int build_run(const Manifest *m) {
     return 0;
   }
 
+  if (ctx_cout)
+    *ctx_cout = ctx;
   printf("smelt: built %s\n", output);
   return 1;
 }
