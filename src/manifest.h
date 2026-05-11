@@ -17,6 +17,7 @@ typedef struct {
   char name[MAX_NAME];
   char git[MAX_STR];
   char path[MAX_PATH];
+  char pkg_config[MAX_NAME];
   char files[MAX_DEP_FILES][MAX_PATH];
   int file_count;
   int is_local;

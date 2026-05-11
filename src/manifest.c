@@ -126,6 +126,10 @@ int manifest_load(const char *path, Manifest *out) {
                      f.u.s);
         }
       }
+
+      toml_datum_t pkgcfg = toml_get(entry, "pkg-config");
+      if (pkgcfg.type == TOML_STRING)
+        snprintf(dep->pkg_config, sizeof(dep->pkg_config), "%s", pkgcfg.u.s);
     }
   }
 

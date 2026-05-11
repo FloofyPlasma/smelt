@@ -84,6 +84,10 @@ int main(int argc, char **argv) {
       return dep_add_local(target) ? 0 : 1;
     }
 
+    if (argc >= 4 && strcmp(argv[2], "--pkg-config") == 0) {
+      return dep_add_pkgconfig(argv[3]) ? 0 : 1;
+    }
+
     if (argc < 4) {
       fprintf(stderr, "smept: git dep requires at least one file\n");
       fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");

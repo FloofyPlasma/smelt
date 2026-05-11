@@ -199,6 +199,18 @@ int dep_add_local(const char *path) {
   return 1;
 }
 
+int dep_add_pkgconfig(const char *name) {
+  char cmd[MAX_CMD];
+  snprintf(cmd, sizeof(cmd), "pkg-config --exists %s 2>/dev/null", name);
+  if (system(cmd) != 0) {
+    fprintf(stderr, "smelt: pkg-config: %s not found\n", name);
+    return 0;
+  }
+  char entry[MAX_STR * 2];
+  snprintf(entry, sizeof(entry), "%s = { pkg-config = \"%s\" }", name, name);
+  return toml_write_dep(entry);
+}
+
 static int ensure_git_dep(Dep *dep, Manifest *m) {
   char cache[MAX_PATH];
   if (!fetch_git(dep->git, cache, sizeof(cache)))
@@ -314,10 +326,99 @@ static int ensure_local_dep(Dep *dep, Manifest *m) {
   return 1;
 }
 
+static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
+  if (system("pkg-config --version > /dev/null 2>&1") != 0) {
+    fprintf(stderr, "smelt: pkg-config not found\n");
+    return 0;
+  }
+
+  char cmd[MAX_CMD];
+  snprintf(cmd, sizeof(cmd), "pkg-config --exists %s 2>/dev/null",
+           dep->pkg_config);
+  if (system(cmd) != 0) {
+    fprintf(stderr, "smelt: pkg-config: %s not found\n", dep->pkg_config);
+    fprintf(stderr, "smelt: try installing %s with your system package manager",
+            dep->pkg_config);
+    return 0;
+  }
+
+  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>/dev/null",
+           dep->pkg_config);
+  FILE *fp = popen(cmd, "r");
+  if (fp) {
+    char cflags[4096] = {0};
+    fgets(cflags, sizeof(cflags), fp);
+    pclose(fp);
+    cflags[strcspn(cflags, "\n")] = '\0';
+
+    char *tok = strtok(cflags, " ");
+    while (tok) {
+      if (strncmp(tok, "-I", 2) == 0) {
+        if (m->include_count < MAX_INCLUDES) {
+          int found = 0;
+          for (int i = 0; i < m->include_count; i++)
+            if (strcmp(m->include_dirs[i], tok + 2) == 0) {
+              found = 1;
+              break;
+            }
+          if (!found)
+            snprintf(m->include_dirs[m->include_count++],
+                     sizeof(m->include_dirs[0]), "%s", tok + 2);
+        }
+      } else if (strncmp(tok, "-D", 2) == 0) {
+        if (m->define_count < MAX_DEFINES) {
+          int found = 0;
+          for (int i = 0; i < m->define_count; i++)
+            if (strcmp(m->defines[i], tok + 2) == 0) {
+              found = 1;
+              break;
+            }
+          if (!found)
+            snprintf(m->defines[m->define_count++], sizeof(m->defines[0]), "%s",
+                     tok + 2);
+        }
+      }
+      tok = strtok(NULL, " ");
+    }
+  }
+
+  snprintf(cmd, sizeof(cmd), "pkg-config --libs %s 2>/dev/null",
+           dep->pkg_config);
+  fp = popen(cmd, "r");
+  if (fp) {
+    char libs[4096] = {0};
+    fgets(libs, sizeof(libs), fp);
+    pclose(fp);
+    libs[strcspn(libs, "\n")] = '\0';
+
+    char *tok = strtok(libs, " ");
+    while (tok) {
+      if (m->link_flag_count < MAX_LINK_FLAGS) {
+        int found = 0;
+        for (int i = 0; i < m->link_flag_count; i++)
+          if (strcmp(m->link_flags[i], tok) == 0) {
+            found = 1;
+            break;
+          }
+        if (!found)
+          snprintf(m->link_flags[m->link_flag_count++],
+                   sizeof(m->link_flags[0]), "%s", tok);
+      }
+      tok = strtok(NULL, " ");
+    }
+  }
+
+  printf("smelt: pkg-config: resolved %s\n", dep->pkg_config);
+  return 1;
+}
+
 int deps_ensure(Manifest *m) {
   for (int i = 0; i < m->dep_count; i++) {
     Dep *dep = &m->deps[i];
-    if (dep->is_local) {
+    if (dep->pkg_config[0]) {
+      if (!ensure_pkgconfig_dep(dep, m))
+        return 0;
+    } else if (dep->is_local) {
       if (!ensure_local_dep(dep, m))
         return 0;
     } else if (dep->git[0]) {

@@ -31,6 +31,7 @@ smelt build release # release build
 smelt run           # build and run
 smelt clean         # remove build artifacts
 smelt add <url> <file1> [file2 ...]  # add git dependency
+smelt add --pkg-config <name>        # add pkg-config dependency
 smelt add <local/path>               # add local smelt-aware dependency
 ```
 
@@ -60,7 +61,6 @@ Sources are compiled incrementally alongside your project.
 - [ ] Lockfile support
 - [ ] `smelt update` command
 - [ ] `smelt test` command
-- [ ] pkg-config integration
 - [ ] Package registry with build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
 
 ## License
