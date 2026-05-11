@@ -10,10 +10,17 @@
 #define MAX_PROFILE_FLAGS 32
 #define MAX_LINK_FLAGS 32
 #define MAX_DEFINES 32
+#define MAX_DEP_FILES 16
+#define MAX_DEP_SOURCES 256
 
 typedef struct {
   char name[MAX_NAME];
-  char version[MAX_STR];
+  char git[MAX_STR];
+  char path[MAX_PATH];
+  char files[MAX_DEP_FILES][MAX_PATH];
+  int file_count;
+  int is_local;
+  int is_smelt_aware;
 } Dep;
 
 typedef struct {
@@ -40,6 +47,8 @@ typedef struct {
   int link_flag_count;
   char defines[MAX_DEFINES][MAX_PATH];
   int define_count;
+  char dep_sources[MAX_DEP_SOURCES][MAX_PATH];
+  int dep_source_count;
 } Manifest;
 
 int manifest_load(const char *path, Manifest *out);

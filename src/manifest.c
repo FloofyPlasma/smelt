@@ -91,6 +91,44 @@ int manifest_load(const char *path, Manifest *out) {
     out->release.flag_count = 2;
   }
 
+  // [dependencies]
+  toml_datum_t deps_table = toml_seek(t, "dependencies");
+  if (deps_table.type == TOML_TABLE) {
+    int n = deps_table.u.tab.size;
+    for (int i = 0; i < n && out->dep_count < MAX_DEPS; i++) {
+      const char *depname = deps_table.u.tab.key[i];
+      if (!depname)
+        continue;
+
+      Dep *dep = &out->deps[out->dep_count++];
+      snprintf(dep->name, sizeof(dep->name), "%s", depname);
+
+      toml_datum_t entry = toml_get(deps_table, depname);
+      if (entry.type != TOML_TABLE)
+        continue;
+
+      toml_datum_t git = toml_get(entry, "git");
+      if (git.type == TOML_STRING)
+        snprintf(dep->git, sizeof(dep->git), "%s", git.u.s);
+
+      toml_datum_t path = toml_get(entry, "path");
+      if (path.type == TOML_STRING) {
+        snprintf(dep->path, sizeof(dep->path), "%s", path.u.s);
+        dep->is_local = 1;
+      }
+
+      toml_datum_t files = toml_get(entry, "files");
+      if (files.type == TOML_ARRAY) {
+        for (int j = 0; j < files.u.arr.size && j < MAX_DEP_FILES; j++) {
+          toml_datum_t f = files.u.arr.elem[j];
+          if (f.type == TOML_STRING)
+            snprintf(dep->files[dep->file_count++], sizeof(dep->files[0]), "%s",
+                     f.u.s);
+        }
+      }
+    }
+  }
+
   toml_free(result);
   return 1;
 }

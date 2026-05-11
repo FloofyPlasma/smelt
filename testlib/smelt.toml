@@ -1,0 +1,9 @@
+[package]
+name = "testlib"
+version = "0.1.0"
+
+[build]
+c_standard = "c17"
+warnings = "all"
+src_dir = "src"
+out_dir = "build"

@@ -17,3 +17,8 @@ flags = ["-g", "-O0"]
 
 [profile.release]
 flags = ["-O3", "-DNDEBUG"]
+
+[dependencies]
+tomlc17 = { git = "https://github.com/cktan/tomlc17", files = ["src/tomlc17.c", "src/tomlc17.h"] }
+testlib = { path = "./testlib" }
+xxhash = { git = "https://github.com/cyan4973/xxhash", files = ["xxhash.c", "xxhash.h"] }

@@ -23,6 +23,8 @@ int main(int argc, char **argv) {
     BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
+    if (!deps_ensure(&m))
+      return 1;
     if (!build_run(&m, &ctx, profile))
       return 1;
     compdb_write(&m, &ctx);
@@ -35,6 +37,8 @@ int main(int argc, char **argv) {
       profile = argv[2];
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
+      return 1;
+    if (!deps_ensure(&m))
       return 1;
     if (!build_run(&m, NULL, profile))
       return 1;
@@ -70,12 +74,24 @@ int main(int argc, char **argv) {
   if (strcmp(argv[1], "add") == 0) {
     if (argc < 3) {
       fprintf(stderr, "usage: smelt add <git-url> [file1 file2 ...]\n");
+      fprintf(stderr, "       smelt add <local/path>\n");
       return 1;
     }
-    const char *url = argv[2];
+
+    const char *target = argv[2];
+
+    if (target[0] == '.' || target[0] == '/') {
+      return dep_add_local(target) ? 0 : 1;
+    }
+
+    if (argc < 4) {
+      fprintf(stderr, "smept: git dep requires at least one file\n");
+      fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");
+      return 1;
+    }
     const char **files = (const char **)&argv[3];
     int file_count = argc - 3;
-    return dep_fetch(url, files, file_count) ? 0 : 1;
+    return dep_add_git(target, files, file_count) ? 0 : 1;
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);

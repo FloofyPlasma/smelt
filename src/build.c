@@ -130,6 +130,16 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   if (!scan_dir(&ctx, m->src_dir))
     return 0;
+
+  for (int i = 0; i < m->dep_source_count; i++) {
+    if (ctx.source_count >= MAX_SOURCES) {
+      fprintf(stderr, "smelt: too many sources\n");
+      return 0;
+    }
+    snprintf(ctx.sources[ctx.source_count++], sizeof(ctx.sources[0]), "%s",
+             m->dep_sources[i]);
+  }
+
   if (ctx.source_count == 0) {
     fprintf(stderr, "smelt: no .c files found in %s\n", m->src_dir);
     return 0;

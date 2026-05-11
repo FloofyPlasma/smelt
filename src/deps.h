@@ -3,6 +3,11 @@
 
 #define MAX_CMD 16384
 
-int dep_fetch(const char *url, const char **files, int file_count);
+#include "manifest.h"
+
+int deps_ensure(Manifest *m);
+
+int dep_add_git(const char *url, const char **files, int file_count);
+int dep_add_local(const char *path);
 
 #endif
