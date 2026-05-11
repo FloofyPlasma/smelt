@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "deps.h"
+#include "lock.h"
 #include "manifest.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -120,7 +121,8 @@ static int toml_write_dep(const char *entry) {
   return 1;
 }
 
-static int fetch_git(const char *url, char *cache_out, size_t cache_sz) {
+static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
+                     LockFile *lf, int use_lock) {
   char name[MAX_NAME];
   repo_name(name, sizeof(name), url);
   cache_path(cache_out, cache_sz, name);
@@ -137,12 +139,44 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz) {
   } else {
     printf("smelt: using cached %s\n", cache_out);
   }
+
+  if (use_lock && lf) {
+    const char *pinned = lockfile_get_commit(lf, name);
+    if (pinned) {
+      char cmd[MAX_CMD];
+      snprintf(cmd, sizeof(cmd),
+               "git -C %s fetch --depth=1 origin %s 2>/dev/null", cache_out,
+               pinned);
+      system(cmd);
+      snprintf(cmd, sizeof(cmd), "git -C %s checkout FETCH_HEAD 2>/dev/null",
+               cache_out);
+      system(cmd);
+      printf("smelt: pinned %s @ %s\n", name, pinned);
+    }
+  }
+
+  char commit[64] = {0};
+  char cmd[MAX_CMD];
+  snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null", cache_out);
+  FILE *fp = popen(cmd, "r");
+  if (fp) {
+    fgets(commit, sizeof(commit), fp);
+    pclose(fp);
+    commit[strcspn(commit, "\n")] = '\0';
+  }
+
+  if (lf && commit[0])
+    lockfile_set(lf, name, url, commit);
+
   return 1;
 }
 
 int dep_add_git(const char *url, const char **files, int file_count) {
+  LockFile lf;
+  lockfile_load(&lf);
+
   char cache[MAX_PATH];
-  if (!fetch_git(url, cache, sizeof(cache)))
+  if (!fetch_git(url, cache, sizeof(cache), &lf, 1))
     return 0;
 
   mkdir("vendor", 0755);
@@ -173,6 +207,7 @@ int dep_add_git(const char *url, const char **files, int file_count) {
            files_str);
   toml_write_dep(entry);
 
+  lockfile_save(&lf);
   return 1;
 }
 
@@ -211,9 +246,9 @@ int dep_add_pkgconfig(const char *name) {
   return toml_write_dep(entry);
 }
 
-static int ensure_git_dep(Dep *dep, Manifest *m) {
+static int ensure_git_dep(Dep *dep, Manifest *m, LockFile *lf) {
   char cache[MAX_PATH];
-  if (!fetch_git(dep->git, cache, sizeof(cache)))
+  if (!fetch_git(dep->git, cache, sizeof(cache), lf, 1))
     return 0;
 
   mkdir("vendor", 0755);
@@ -413,6 +448,10 @@ static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
 }
 
 int deps_ensure(Manifest *m) {
+  LockFile lf;
+  lockfile_load(&lf);
+  int dirty = 0;
+
   for (int i = 0; i < m->dep_count; i++) {
     Dep *dep = &m->deps[i];
     if (dep->pkg_config[0]) {
@@ -422,9 +461,13 @@ int deps_ensure(Manifest *m) {
       if (!ensure_local_dep(dep, m))
         return 0;
     } else if (dep->git[0]) {
-      if (!ensure_git_dep(dep, m))
+      if (!ensure_git_dep(dep, m, &lf))
         return 0;
+      dirty = 1;
     }
   }
+
+  if (dirty)
+    lockfile_save(&lf);
   return 1;
 }

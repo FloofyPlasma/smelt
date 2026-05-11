@@ -9,7 +9,8 @@ A fast, simple build tool for C projects. Inspired by cargo. Just add a `smelt.t
 - Simple TOML manifest
 - Incremental builds with content hashing 
 - Parallel compilation
-- Git and local dependency management 
+- Git, pkg-config and local dependency management 
+- Lockfile support for dependency pinning
 - Debug/release profiles
 - `compile_commands.json` generation for compatible LSP
 
@@ -56,9 +57,16 @@ smelt add ../mylib
 
 Sources are compiled incrementally alongside your project.
 
+### pkg-config dependency
+
+```bash
+smelt add --pkg-config sdl2
+```
+
+Include flags and linker flags are automatically applied.
+
 ## Roadmap
 
-- [ ] Lockfile support
 - [ ] `smelt update` command
 - [ ] `smelt test` command
 - [ ] Package registry with build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
