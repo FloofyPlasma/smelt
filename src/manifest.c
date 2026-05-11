@@ -18,6 +18,18 @@ static void parse_profile(toml_datum_t root, const char *key, Profile *out) {
   }
 }
 
+static void parse_str_array(toml_datum_t root, const char *key,
+                            char dst[][MAX_PATH], int *count, int max) {
+  toml_datum_t arr = toml_seek(root, key);
+  if (arr.type != TOML_ARRAY)
+    return;
+  for (int i = 0; i < arr.u.arr.size && i < max; i++) {
+    toml_datum_t e = arr.u.arr.elem[i];
+    if (e.type == TOML_STRING)
+      scopy(dst[(*count)++], MAX_PATH, e.u.s);
+  }
+}
+
 int manifest_load(const char *path, Manifest *out) {
   *out = (Manifest){0};
 
@@ -42,10 +54,6 @@ int manifest_load(const char *path, Manifest *out) {
   toml_datum_t warn = toml_seek(t, "build.warnings");
   toml_datum_t src = toml_seek(t, "build.src_dir");
   toml_datum_t odir = toml_seek(t, "build.out_dir");
-  toml_datum_t incs = toml_seek(t, "build.include_dirs");
-  toml_datum_t extras = toml_seek(t, "build.extra_sources");
-  toml_datum_t lflags = toml_seek(t, "build.link_flags");
-  toml_datum_t defs = toml_seek(t, "build.defines");
   if (std.type == TOML_STRING)
     scopy(out->c_standard, sizeof(out->c_standard), std.u.s);
   if (warn.type == TOML_STRING)
@@ -54,38 +62,15 @@ int manifest_load(const char *path, Manifest *out) {
     scopy(out->src_dir, sizeof(out->src_dir), src.u.s);
   if (odir.type == TOML_STRING)
     scopy(out->out_dir, sizeof(out->out_dir), odir.u.s);
-  if (incs.type == TOML_ARRAY) {
-    for (int i = 0; i < incs.u.arr.size && i < MAX_INCLUDES; i++) {
-      toml_datum_t e = incs.u.arr.elem[i];
-      if (e.type == TOML_STRING)
-        scopy(out->include_dirs[out->include_count++],
-              sizeof(out->include_dirs[0]), e.u.s);
-    }
-  }
-  if (extras.type == TOML_ARRAY) {
-    for (int i = 0; i < extras.u.arr.size && i < MAX_EXTRA; i++) {
-      toml_datum_t e = extras.u.arr.elem[i];
-      if (e.type == TOML_STRING)
-        scopy(out->extra_sources[out->extra_count++],
-              sizeof(out->extra_sources[0]), e.u.s);
-    }
-  }
-  if (lflags.type == TOML_ARRAY) {
-    for (int i = 0; i < lflags.u.arr.size && i < MAX_LINK_FLAGS; i++) {
-      toml_datum_t e = lflags.u.arr.elem[i];
-      if (e.type == TOML_STRING)
-        scopy(out->link_flags[out->link_flag_count++],
-              sizeof(out->link_flags[0]), e.u.s);
-    }
-  }
-  if (defs.type == TOML_ARRAY) {
-    for (int i = 0; i < defs.u.arr.size && i < MAX_DEFINES; i++) {
-      toml_datum_t e = defs.u.arr.elem[i];
-      if (e.type == TOML_STRING)
-        scopy(out->defines[out->define_count++], sizeof(out->defines[0]),
-              e.u.s);
-    }
-  }
+
+  parse_str_array(t, "build.include_dirs", out->include_dirs,
+                  &out->include_count, MAX_INCLUDES);
+  parse_str_array(t, "build.extra_sources", out->extra_sources,
+                  &out->extra_count, MAX_EXTRA);
+  parse_str_array(t, "build.link_flags", out->link_flags, &out->link_flag_count,
+                  MAX_LINK_FLAGS);
+  parse_str_array(t, "build.defines", out->defines, &out->define_count,
+                  MAX_DEFINES);
 
   if (out->src_dir[0] == '\0')
     scopy(out->src_dir, sizeof(out->src_dir), "src");

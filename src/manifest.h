@@ -36,9 +36,9 @@ typedef struct {
   int include_count;
   Profile debug;
   Profile release;
-  char link_flags[MAX_LINK_FLAGS][MAX_STR];
+  char link_flags[MAX_LINK_FLAGS][MAX_PATH];
   int link_flag_count;
-  char defines[MAX_DEFINES][MAX_STR];
+  char defines[MAX_DEFINES][MAX_PATH];
   int define_count;
 } Manifest;
 
