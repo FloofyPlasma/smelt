@@ -279,6 +279,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   if (ctx_out)
     *ctx_out = ctx;
+
+  stringvec_free(&obj_files);
   return 1;
 }
 
