@@ -21,6 +21,7 @@ typedef struct {
 
 int cache_hash_file(const char *path, char *dst, size_t dstsz);
 void cache_hash_str(const char *str, char *dst, size_t dstsz);
+void cache_hash_vec(const StringVec *v, char *dst, size_t dstsz);
 void cache_load(BuildCache *c);
 void cache_save(const BuildCache *c);
 const char *cache_get(const BuildCache *c, const char *source);

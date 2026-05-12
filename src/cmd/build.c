@@ -1,3 +1,4 @@
+#include "core/process.h"
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
 #include "cmd/ccflags.h"
@@ -57,12 +58,26 @@ static int scan_dir(BuildCtx *ctx, const char *dir) {
 
 static void ensure_dir(const char *path) { mkdir(path, 0755); }
 
+// TODO(FloofyPlasma): move this elsewhere
+static void hash_update_vec(XXH3_state_t *state, const StringVec *v) {
+  for (size_t i = 0; i < stringvec_len(v); i++) {
+    const char *s = stringvec_get(v, i);
+
+    XXH3_64bits_update(state, s, strlen(s));
+
+    char nul = '\0';
+    XXH3_64bits_update(state, &nul, 1);
+  }
+}
+
+// TODO(FloofyPlasma): move this elsewhere
 static int hash_source_and_deps(const char *src, const char *obj_dir,
-                                const char *flags, char *out, size_t outsz) {
+                                const StringVec *flags, char *out,
+                                size_t outsz) {
   XXH3_state_t *state = XXH3_createState();
   XXH3_64bits_reset(state);
 
-  XXH3_64bits_update(state, flags, strlen(flags));
+  hash_update_vec(state, flags);
 
   // Hash source file
   FILE *fp = fopen(src, "rbe");
@@ -147,27 +162,31 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   ensure_dir(m->out_dir);
 
-  char cmdline[4096] = {0};
-  ccflags_write_command_line(m, profile, cmdline, sizeof(cmdline), 0);
+  StringVec flags = {0};
+
+  if (!ccflags_build_vec(m, profile, &flags, 0))
+    return 0;
 
   printf("smelt: profile=%s\n", profile);
 
-  char ver_cmd[MAX_PATH + 64];
-  snprintf(ver_cmd, sizeof(ver_cmd), "%s --version 2>&1 | head -1",
-           ctx.compiler);
+  Process ver_proc = {0};
+
+  process_argv_push(&ver_proc, ctx.compiler);
+  process_argv_push(&ver_proc, "--version");
+
   char compiler_ver[256] = {0};
-  FILE *vp = popen(ver_cmd, "r");
-  if (vp) {
-    fgets(compiler_ver, sizeof(compiler_ver), vp);
-    pclose(vp);
+
+  if (process_capture(&ver_proc, compiler_ver, sizeof(compiler_ver))) {
+    compiler_ver[strcspn(compiler_ver, "\n")] = '\0';
   }
-  compiler_ver[strcspn(compiler_ver, "\n")] = '\0';
+
+  process_free(&ver_proc);
 
   BuildCache cache;
   cache_load(&cache);
 
   char flags_hash[MAX_HASH];
-  cache_hash_str(cmdline, flags_hash, sizeof(flags_hash));
+  cache_hash_vec(&flags, flags_hash, sizeof(flags_hash));
   int flags_changed = strcmp(flags_hash, cache.flags_hash) != 0 ||
                       strcmp(compiler_ver, cache.compiler_ver) != 0;
   if (flags_changed)
@@ -192,40 +211,53 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     stringvec_push(&obj_files, obj);
 
     new_hashes[i][0] = '\0';
-    hash_source_and_deps(src, m->out_dir, cmdline, new_hashes[i], MAX_HASH);
+    hash_source_and_deps(src, m->out_dir, &flags, new_hashes[i], MAX_HASH);
 
     const char *old_hash = cache_get(&cache, src);
     needs_compile[i] =
         flags_changed || !old_hash || strcmp(old_hash, new_hashes[i]) != 0;
   }
 
-  pid_t pids[MAX_SOURCES] = {0};
   int any_compiled = 0;
 
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
+    const char *src = stringvec_get(&ctx.sources, i);
+    const char *obj = stringvec_get(&obj_files, i);
+
     if (!needs_compile[i]) {
       printf("smelt: skip %s (unchanged)\n", stringvec_get(&ctx.sources, i));
       continue;
     }
 
-    char cmd[MAX_CMD] = {0};
-    snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, cmdline,
-             stringvec_get(&ctx.sources, i), stringvec_get(&obj_files, i));
-    printf("smelt: %s\n", cmd);
+    Process proc = {0};
 
-    pid_t pid = fork();
-    if (pid < 0) {
-      perror("smelt: fork");
+    process_argv_push(&proc, ctx.compiler);
+
+    process_argv_extend(&proc, &flags);
+
+    process_argv_push(&proc, "-MMD");
+    process_argv_push(&proc, "-c");
+
+    process_argv_push(&proc, src);
+
+    process_argv_push(&proc, "-o");
+    process_argv_push(&proc, obj);
+
+    // TODO(FloofyPlasma): Add process printing
+
+    if (!process_run(&proc)) {
+      fprintf(stderr, "smelt: compile failed: %s\n", src);
+      process_free(&proc);
       return 0;
     }
-    if (pid == 0) {
-      execl("/bin/sh", "sh", "-c", cmd, NULL);
-      _exit(1);
-    }
-    pids[i] = pid;
+
+    process_free(&proc);
+
     any_compiled = 1;
   }
 
+  // TODO(FloofyPlasma): process tracking
+  /*
   int build_ok = 1;
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (pids[i] == 0)
@@ -240,12 +272,13 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   }
   if (!build_ok)
     return 0;
+  */
 
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (!needs_compile[i])
       continue;
     char final_hash[MAX_HASH] = {0};
-    hash_source_and_deps(stringvec_get(&ctx.sources, i), m->out_dir, cmdline,
+    hash_source_and_deps(stringvec_get(&ctx.sources, i), m->out_dir, &flags,
                          final_hash, MAX_HASH);
     cache_set(&cache, stringvec_get(&ctx.sources, i), final_hash);
   }
@@ -254,19 +287,27 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   snprintf(output, sizeof(output), "%s/%s", m->out_dir, m->name);
 
   if (any_compiled || flags_changed) {
-    char cmd[MAX_CMD] = {0};
-    int pos = 0;
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, "%s", ctx.compiler);
-    pos += stringvec_join(&obj_files, ' ', cmd, sizeof(cmd), pos);
-    pos += stringvec_join(&m->extra_sources, ' ', cmd, sizeof(cmd), pos);
-    pos += stringvec_join(&m->link_flags, ' ', cmd, sizeof(cmd), pos);
-    pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -o %s", output);
-    printf("smelt: %s\n", cmd);
+    Process proc = {0};
 
-    if (system(cmd) != 0) {
+    process_argv_push(&proc, ctx.compiler);
+
+    process_argv_extend(&proc, &obj_files);
+    process_argv_extend(&proc, &m->extra_sources);
+    process_argv_extend(&proc, &m->link_flags);
+
+    process_argv_push(&proc, "-o");
+    process_argv_push(&proc, output);
+
+    // TODO(FloofyPlasma): print process
+
+    if (!process_run(&proc)) {
       fprintf(stderr, "smelt: link failed\n");
+      process_free(&proc);
       return 0;
     }
+
+    process_free(&proc);
+
     printf("smelt: Build success!\n");
     printf("smelt: built %s\n", output);
   } else {
@@ -280,6 +321,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   if (ctx_out)
     *ctx_out = ctx;
 
+  stringvec_free(&flags);
   stringvec_free(&obj_files);
   return 1;
 }

@@ -29,3 +29,50 @@ int ccflags_write_command_line(const Manifest *manifest, const char *profile,
 
   return fpos;
 }
+
+int ccflags_build_vec(const Manifest *manifest, const char *profile,
+                      StringVec *out, int no_defines) {
+  char buf[512];
+
+  if (manifest->c_standard[0]) {
+    snprintf(buf, sizeof(buf), "-std=%s", manifest->c_standard);
+    if (!stringvec_push(out, buf))
+      return 0;
+  }
+
+  if (strcmp(manifest->warnings, "all") == 0) {
+    if (!stringvec_push(out, "-Wall"))
+      return 0;
+
+    if (!stringvec_push(out, "-Wextra"))
+      return 0;
+  }
+
+  for (size_t i = 0; i < stringvec_len(&manifest->include_dirs); i++) {
+    snprintf(buf, sizeof(buf), "-I%s",
+             stringvec_get(&manifest->include_dirs, i));
+
+    if (!stringvec_push(out, buf))
+      return 0;
+  }
+
+  if (!no_defines) {
+    for (size_t i = 0; i < stringvec_len(&manifest->defines); i++) {
+      snprintf(buf, sizeof(buf), "-D%s", stringvec_get(&manifest->defines, i));
+
+      if (!stringvec_push(out, buf))
+        return 0;
+    }
+  }
+
+  const Profile *prof = (profile && strcmp(profile, "release") == 0)
+                            ? &manifest->release
+                            : &manifest->debug;
+
+  for (size_t i = 0; i < stringvec_len(&prof->flags); i++) {
+    if (!stringvec_push(out, stringvec_get(&prof->flags, i)))
+      return 0;
+  }
+
+  return 1;
+}
