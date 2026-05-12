@@ -31,6 +31,7 @@ smelt build         # debug build (default)
 smelt build release # release build
 smelt run           # build and run
 smelt clean         # remove build artifacts
+smelt update        # re-fetch dependencies
 smelt add <url> <file1> [file2 ...]  # add git dependency
 smelt add --pkg-config <name>        # add pkg-config dependency
 smelt add <local/path>               # add local smelt-aware dependency
@@ -67,7 +68,6 @@ Include flags and linker flags are automatically applied.
 
 ## Roadmap
 
-- [ ] `smelt update` command
 - [ ] `smelt test` command
 - [ ] Package registry with build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
 

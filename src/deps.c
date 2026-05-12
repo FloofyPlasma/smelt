@@ -447,6 +447,59 @@ static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
   return 1;
 }
 
+int deps_update(Manifest *m) {
+  LockFile lf = {0};
+
+  for (int i = 0; i < m->dep_count; i++) {
+    Dep *dep = &m->deps[i];
+    if (dep->pkg_config[0]) {
+      printf("smelt: skip %s (pkg-config, system managed)\n", dep->name);
+    } else if (dep->is_local) {
+      printf("smelt: skip %s (local)\n", dep->name);
+    } else if (dep->git[0]) {
+      char cache[MAX_PATH];
+
+      char cmd[MAX_CMD];
+      char name[MAX_NAME];
+      repo_name(name, sizeof(name), dep->git);
+      char cache_dir[MAX_PATH];
+      cache_path(cache_dir, sizeof(cache_dir), name);
+
+      if (dir_exists(cache_dir)) {
+        snprintf(cmd, sizeof(cmd),
+                 "git -C %s fetch --depth=1 origin HEAD 2>/dev/null && git -C "
+                 "%s reset --hard FETCH_HEAD 2>/dev/null",
+                 cache_dir, cache_dir);
+        printf("smelt: updating %s\n", name);
+        system(cmd);
+        snprintf(cache, sizeof(cache), "%s", cache_dir);
+      }
+
+      char commit[64] = {0};
+      snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null",
+               cache_dir);
+      FILE *fp = popen(cmd, "r");
+      if (fp) {
+        fgets(commit, sizeof(commit), fp);
+        pclose(fp);
+        commit[strcspn(commit, "\n")] = '\0';
+      }
+
+      if (commit[0]) {
+        lockfile_set(&lf, name, dep->git, commit);
+        printf("smelt: updated %s @ %.8s\n", name, commit);
+      }
+
+      if (!ensure_git_dep(dep, m, &lf))
+        return 0;
+    }
+  }
+
+  lockfile_save(&lf);
+  printf("smelt: lockfile updated\n");
+  return 1;
+}
+
 int deps_ensure(Manifest *m) {
   LockFile lf;
   lockfile_load(&lf);

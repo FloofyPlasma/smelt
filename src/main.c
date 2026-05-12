@@ -11,7 +11,7 @@
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "usage: smelt <command>\n");
-    fprintf(stderr, "commands: build, run, clean, init, add\n");
+    fprintf(stderr, "commands: build, run, clean, init, add, update\n");
     return 1;
   }
 
@@ -96,6 +96,13 @@ int main(int argc, char **argv) {
     const char **files = (const char **)&argv[3];
     int file_count = argc - 3;
     return dep_add_git(target, files, file_count) ? 0 : 1;
+  }
+
+  if (strcmp(argv[1], "update") == 0) {
+    Manifest m = {0};
+    if (!manifest_load("smelt.toml", &m))
+      return 1;
+    return deps_update(&m) ? 0 : 1;
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);
