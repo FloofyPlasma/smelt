@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 int compdb_write(const Manifest *m, const BuildCtx *ctx) {
-  FILE *fp = fopen("compile_commands.json", "w");
+  FILE *fp = fopen("compile_commands.json", "we");
   if (!fp) {
     perror("smelt: cannot write compile_commands.json");
     return 0;

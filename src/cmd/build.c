@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
-#include "project/cache.h"
 #include "cmd/ccflags.h"
+#include "project/cache.h"
 #include "project/manifest.h"
 #include "xxhash.h"
 #include <dirent.h>
@@ -67,7 +67,7 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
   XXH3_64bits_update(state, flags, strlen(flags));
 
   // Hash source file
-  FILE *fp = fopen(src, "rb");
+  FILE *fp = fopen(src, "rbe");
   if (!fp) {
     XXH3_freeState(state);
     return 0;
@@ -86,7 +86,7 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
   if (dlen > 2)
     dfile[dlen - 1] = 'd';
 
-  FILE *df = fopen(dfile, "r");
+  FILE *df = fopen(dfile, "re");
   if (df) {
     char line[4096];
     while (fgets(line, sizeof(line), df)) {
@@ -105,7 +105,7 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
           continue;
         if (strcmp(token, src) == 0)
           continue;
-        FILE *hf = fopen(token, "rb");
+        FILE *hf = fopen(token, "rbe");
         if (hf) {
           while ((n = fread(buf, 1, sizeof(buf), hf)) > 0)
             XXH3_64bits_update(state, buf, n);

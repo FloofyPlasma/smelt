@@ -5,7 +5,7 @@
 int lockfile_load(LockFile *lf) {
   *lf = (LockFile){0};
 
-  FILE *fp = fopen(LOCK_FILE, "r");
+  FILE *fp = fopen(LOCK_FILE, "re");
   if (!fp)
     return 1;
 
@@ -70,7 +70,7 @@ int lockfile_load(LockFile *lf) {
 }
 
 int lockfile_save(const LockFile *lf) {
-  FILE *fp = fopen(LOCK_FILE, "w");
+  FILE *fp = fopen(LOCK_FILE, "we");
   if (!fp) {
     perror("smelt: cannot write smelt.lock");
     return 0;

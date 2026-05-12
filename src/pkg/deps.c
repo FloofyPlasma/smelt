@@ -2,7 +2,6 @@
 #include "pkg/deps.h"
 #include "project/lock.h"
 #include "project/manifest.h"
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,12 +47,12 @@ static void ensure_dirs(const char *path) {
 }
 
 static int copy_file(const char *src, const char *dst) {
-  FILE *in = fopen(src, "rb");
+  FILE *in = fopen(src, "rbe");
   if (!in) {
     perror(src);
     return 0;
   }
-  FILE *out = fopen(dst, "wb");
+  FILE *out = fopen(dst, "wbe");
   if (!out) {
     perror(dst);
     fclose(in);
@@ -79,7 +78,7 @@ static int ends_with_c(const char *name) {
 }
 
 static int toml_write_dep(const char *entry) {
-  FILE *fp = fopen("smelt.toml", "r");
+  FILE *fp = fopen("smelt.toml", "re");
   if (fp) {
     char line[1024];
     while (fgets(line, sizeof(line), fp)) {
@@ -91,14 +90,14 @@ static int toml_write_dep(const char *entry) {
     fclose(fp);
   }
 
-  fp = fopen("smelt.toml", "r");
+  fp = fopen("smelt.toml", "re");
   if (!fp)
     return 0;
   char content[65536] = {0};
   fread(content, 1, sizeof(content) - 1, fp);
   fclose(fp);
 
-  fp = fopen("smelt.toml", "w");
+  fp = fopen("smelt.toml", "we");
   if (!fp)
     return 0;
 

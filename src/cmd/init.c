@@ -4,7 +4,7 @@
 #include <sys/stat.h>
 
 int init_run(void) {
-  FILE *check = fopen("smelt.toml", "r");
+  FILE *check = fopen("smelt.toml", "re");
   if (check) {
     fclose(check);
     fprintf(stderr, "smelt: smelt.toml already exists\n");
@@ -34,7 +34,7 @@ int init_run(void) {
   if (standard[0] == '\0')
     snprintf(standard, sizeof(standard), "c17");
 
-  FILE *fp = fopen("smelt.toml", "w");
+  FILE *fp = fopen("smelt.toml", "we");
   if (!fp) {
     perror("smelt: cannot write smelt.toml");
     return 0;

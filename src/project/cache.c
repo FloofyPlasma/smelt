@@ -7,7 +7,7 @@
 #define CACHE_FILE "build/.smelt_cache"
 
 int cache_hash_file(const char *path, char *dst, size_t dstsz) {
-  FILE *fp = fopen(path, "rb");
+  FILE *fp = fopen(path, "rbe");
   if (!fp)
     return 0;
 
@@ -35,7 +35,7 @@ void cache_hash_str(const char *str, char *dst, size_t dstsz) {
 void cache_load(BuildCache *c) {
   *c = (BuildCache){0};
 
-  FILE *fp = fopen(CACHE_FILE, "r");
+  FILE *fp = fopen(CACHE_FILE, "re");
   if (!fp)
     return;
 
@@ -68,7 +68,7 @@ void cache_load(BuildCache *c) {
 }
 
 void cache_save(const BuildCache *c) {
-  FILE *fp = fopen(CACHE_FILE, "w");
+  FILE *fp = fopen(CACHE_FILE, "we");
   if (!fp) {
     perror("smelt: cannot write cache");
     return;
