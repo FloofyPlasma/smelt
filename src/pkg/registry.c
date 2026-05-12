@@ -1,4 +1,5 @@
 #include "pkg/registry.h"
+#include "core/process.h"
 #include "pkg/deps.h"
 #include "tomlc17.h"
 #include <stdio.h>
@@ -54,12 +55,17 @@ int registry_fetch_recipe(const Manifest *m, const char *name) {
       char local[MAX_PATH];
       snprintf(local, sizeof(local), "%s/%s.toml", base + 7, name);
       if (file_exists(local)) {
-        char cmd[MAX_CMD];
-        snprintf(cmd, sizeof(cmd), "cp %s %s", local, recipe_path);
-        if (system(cmd) == 0) {
+        Process proc = {0};
+
+        process_argv_push(&proc, "cp");
+        process_argv_push(&proc, local);
+        process_argv_push(&proc, recipe_path);
+        if (process_run(&proc)) {
           printf("smelt: found recipe for %s in %s\n", name, base);
+          process_free(&proc);
           return 1;
         }
+        process_free(&proc);
       }
       continue;
     }
@@ -67,15 +73,23 @@ int registry_fetch_recipe(const Manifest *m, const char *name) {
     char url[MAX_STR * 2];
     snprintf(url, sizeof(url), "%s/%s.toml", base, name);
 
-    char cmd[MAX_CMD];
-    snprintf(cmd, sizeof(cmd), "curl -sf --max-time 10 -o %s %s 2>/dev/null",
-             recipe_path, url);
+    Process proc = {0};
+
+    process_argv_push(&proc, "curl");
+    process_argv_push(&proc, "-sf");
+    process_argv_push(&proc, "--max-time");
+    process_argv_push(&proc, "10");
+    process_argv_push(&proc, "-o");
+    process_argv_push(&proc, recipe_path);
+    process_argv_push(&proc, url);
     printf("smelt: fetching recipe %s\n", url);
 
-    if (system(cmd) == 0 && file_exists(recipe_path)) {
+    if (process_run(&proc) && file_exists(recipe_path)) {
       printf("smelt: found recipe for %s\n", name);
+      process_free(&proc);
       return 1;
     }
+    process_free(&proc);
 
     remove(recipe_path);
   }
