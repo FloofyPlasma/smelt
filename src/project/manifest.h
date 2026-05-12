@@ -3,6 +3,9 @@
 
 #include "core/stringvec.h"
 
+// TODO(FloofyPlasma): make MAX_DEPS, MAX_DEP_FILES, MAX_DEP_SOURCES,
+//                     MAX_REGISTRIES obsolete. the other ones are sensible
+//                     defaults, maybe move to a constants header instead?
 #define MAX_NAME 128
 #define MAX_STR 256
 #define MAX_PATH 1024

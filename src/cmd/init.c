@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+// TODO(FloofyPlasma): update template with some of the new properties
 int init_run(void) {
   FILE *check = fopen("smelt.toml", "re");
   if (check) {

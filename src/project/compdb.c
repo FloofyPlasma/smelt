@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+// TODO(FloofyPlasma): clean this up and make it less shitty
 int compdb_write(const Manifest *m, const BuildCtx *ctx) {
   FILE *fp = fopen("compile_commands.json", "we");
   if (!fp) {

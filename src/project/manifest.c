@@ -31,6 +31,7 @@ static void parse_str_array(toml_datum_t root, const char *key,
   }
 }
 
+// TODO(FloofyPlasma): theres a lot of duplicated code here. clean up.
 int manifest_load(const char *path, Manifest *out) {
   *out = (Manifest){0};
 

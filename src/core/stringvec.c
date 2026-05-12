@@ -57,6 +57,7 @@ int stringvec_push(StringVec *v, const char *str) {
   return 1;
 }
 
+// FIXME: if there is a duplicate, OR OOM, both cases return 0...
 int stringvec_push_unique(StringVec *v, const char *str) {
   for (size_t i = 0; i < v->len; i++)
     if (strcmp(v->items[i], str) == 0)

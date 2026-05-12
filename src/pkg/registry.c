@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+// FIXME: duplicated across files
 static void ensure_dirs(const char *path) {
   char tmp[MAX_PATH];
   snprintf(tmp, sizeof(tmp), "%s", path);
@@ -73,6 +74,7 @@ int registry_fetch_recipe(const Manifest *m, const char *name) {
     char url[MAX_STR * 2];
     snprintf(url, sizeof(url), "%s/%s.toml", base, name);
 
+    // TODO(FloofyPlasma): libcurl instead?
     Process proc = {0};
 
     process_argv_push(&proc, "curl");

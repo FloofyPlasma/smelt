@@ -1,7 +1,7 @@
-#include "core/process.h"
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
 #include "cmd/ccflags.h"
+#include "core/process.h"
 #include "project/cache.h"
 #include "project/manifest.h"
 #include "xxhash.h"
@@ -15,13 +15,14 @@
 
 #define MAX_CMD 16384
 
+// FIXME: duplicated across source files
 static int ends_with_c(const char *name) {
   size_t len = strlen(name);
   return len > 2 && name[len - 2] == '.' && name[len - 1] == 'c';
 }
 
 static int scan_dir(BuildCtx *ctx, const char *dir);
-
+// TODO(FloofyPlasma): make this platform independent
 static int scan_dir(BuildCtx *ctx, const char *dir) {
   DIR *d = opendir(dir);
   if (!d) {

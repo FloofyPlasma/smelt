@@ -4,6 +4,7 @@
 #include "project/manifest.h"
 #include <stddef.h>
 
+// TODO(FloofyPlasma): make MAX_SOURCES obsolete
 #define MAX_SOURCES 512
 #define MAX_HASH 65
 
@@ -20,7 +21,6 @@ typedef struct {
 } BuildCache;
 
 int cache_hash_file(const char *path, char *dst, size_t dstsz);
-void cache_hash_str(const char *str, char *dst, size_t dstsz);
 void cache_hash_vec(const StringVec *v, char *dst, size_t dstsz);
 void cache_load(BuildCache *c);
 void cache_save(const BuildCache *c);

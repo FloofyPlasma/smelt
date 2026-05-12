@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+// FIXME: holy fucking shit this is disgusting
 int lockfile_load(LockFile *lf) {
   *lf = (LockFile){0};
 

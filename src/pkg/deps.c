@@ -67,6 +67,7 @@ static void cache_path(char *dst, size_t dstsz, const char *name) {
   snprintf(dst, dstsz, "%s/.cache/smelt/%s", home, name);
 }
 
+// TODO(floofyplasma): treat all repo names as lowercase
 static void repo_name(char *dst, size_t dstsz, const char *url) {
   const char *s = strrchr(url, '/');
   s = s ? s + 1 : url;
@@ -76,16 +77,19 @@ static void repo_name(char *dst, size_t dstsz, const char *url) {
     dst[len - 4] = '\0';
 }
 
+// TODO(floofyplasma): make this platform independent
 static int dir_exists(const char *path) {
   struct stat st;
   return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// TODO(floofyplasma): make this platform independent
 static int file_exists(const char *path) {
   struct stat st;
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+// TODO(floofyplasma): make this platform independent, add error handling
 static void ensure_dirs(const char *path) {
   char tmp[MAX_PATH];
   snprintf(tmp, sizeof(tmp), "%s", path);
@@ -99,6 +103,7 @@ static void ensure_dirs(const char *path) {
   mkdir(tmp, 0755);
 }
 
+// TODO(floofyplasma): add error handling
 static int copy_file(const char *src, const char *dst) {
   FILE *in = fopen(src, "rbe");
   if (!in) {
@@ -130,11 +135,13 @@ static const char *base_name(const char *path) {
   return s ? s + 1 : path;
 }
 
+// FIXME: duplicated across files
 static int ends_with_c(const char *name) {
   size_t len = strlen(name);
   return len > 2 && name[len - 2] == '.' && name[len - 1] == 'c';
 }
 
+// FIXME: this is very fucking disgusting, should probably be rewritten entirely
 static int toml_write_dep(const char *entry) {
   FILE *fp = fopen("smelt.toml", "re");
   if (fp) {
@@ -281,6 +288,7 @@ int dep_add_git(const char *url, const StringVec *files) {
     printf("smelt: copied %s -> %s\n", f, dst);
   }
 
+  // FIXME: abstract into own function
   char name[MAX_NAME];
   repo_name(name, sizeof(name), url);
   char entry[MAX_STR * 4];
@@ -327,6 +335,8 @@ int dep_add_pkgconfig(const char *name) {
     return 0;
   }
   process_free(&pkg_exists);
+
+  // FIXME: ditto
   char entry[MAX_STR * 2];
   snprintf(entry, sizeof(entry), "%s = { pkg-config = \"%s\" }", name, name);
   return toml_write_dep(entry);

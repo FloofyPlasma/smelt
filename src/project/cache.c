@@ -27,11 +27,6 @@ int cache_hash_file(const char *path, char *dst, size_t dstsz) {
   return 1;
 }
 
-void cache_hash_str(const char *str, char *dst, size_t dstsz) {
-  XXH64_hash_t hash = XXH64(str, strlen(str), 0);
-  snprintf(dst, dstsz, "%016llx", (unsigned long long)hash);
-}
-
 static void hash_update_vec(XXH3_state_t *state, const StringVec *v) {
   for (size_t i = 0; i < stringvec_len(v); i++) {
     const char *s = stringvec_get(v, i);

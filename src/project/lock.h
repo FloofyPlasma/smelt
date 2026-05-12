@@ -3,6 +3,8 @@
 
 #include "project/manifest.h"
 
+// TODO(FloofyPlasma): make MAX_LOCK_ENTRIES obsolete
+
 #define MAX_LOCK_ENTRIES 64
 #define LOCK_FILE "smelt.lock"
 

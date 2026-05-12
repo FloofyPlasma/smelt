@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+// FIXME: make this platform independent
 int clean_run(const Manifest *m) {
   DIR *d = opendir(m->out_dir);
   if (!d) {
