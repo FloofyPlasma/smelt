@@ -1,11 +1,64 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pkg/deps.h"
+#include "core/process.h"
 #include "project/lock.h"
 #include "project/manifest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+static int process_capture_lines(Process *proc,
+                                 void (*fn)(char *line, void *ud), void *ud) {
+  char output[65536] = {0};
+
+  if (!process_capture(proc, output, sizeof(output)))
+    return 0;
+
+  char *saveptr = NULL;
+
+  char *line = strtok_r(output, "\n", &saveptr);
+
+  while (line) {
+    fn(line, ud);
+
+    line = strtok_r(NULL, "\n", &saveptr);
+  }
+
+  return 1;
+}
+
+static void parse_pkgconfig_cflags(char *line, void *ud) {
+  Manifest *m = ud;
+
+  char *saveptr = NULL;
+
+  char *tok = strtok_r(line, " ", &saveptr);
+
+  while (tok) {
+    if (strncmp(tok, "-I", 2) == 0) {
+      stringvec_push_unique(&m->include_dirs, tok + 2);
+    } else if (strncmp(tok, "-D", 2) == 0) {
+      stringvec_push_unique(&m->defines, tok + 2);
+    }
+
+    tok = strtok_r(NULL, " ", &saveptr);
+  }
+}
+
+static void parse_pkgconfig_libs(char *line, void *ud) {
+  Manifest *m = ud;
+
+  char *saveptr = NULL;
+
+  char *tok = strtok_r(line, " ", &saveptr);
+
+  while (tok) {
+    stringvec_push_unique(&m->link_flags, tok);
+
+    tok = strtok_r(NULL, " ", &saveptr);
+  }
+}
 
 static void cache_path(char *dst, size_t dstsz, const char *name) {
   const char *home = getenv("HOME");
@@ -60,8 +113,13 @@ static int copy_file(const char *src, const char *dst) {
   }
   char buf[4096];
   size_t n;
-  while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
-    fwrite(buf, 1, n, out);
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+    if (fwrite(buf, 1, n, out) != n) {
+      fclose(in);
+      fclose(out);
+      return 0;
+    }
+  }
   fclose(in);
   fclose(out);
   return 1;
@@ -128,13 +186,20 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
 
   if (!dir_exists(cache_out)) {
     ensure_dirs(cache_out);
-    char cmd[MAX_CMD];
-    snprintf(cmd, sizeof(cmd), "git clone --depth=1 %s %s", url, cache_out);
-    printf("smelt: %s\n", cmd);
-    if (system(cmd) != 0) {
+    Process clone = {0};
+
+    process_argv_push(&clone, "git");
+    process_argv_push(&clone, "clone");
+    process_argv_push(&clone, "--depth=1");
+    process_argv_push(&clone, url);
+    process_argv_push(&clone, cache_out);
+    process_print(&clone);
+    if (!process_run(&clone)) {
       fprintf(stderr, "smelt: git clone failed\n");
+      process_free(&clone);
       return 0;
     }
+    process_free(&clone);
   } else {
     printf("smelt: using cached %s\n", cache_out);
   }
@@ -142,27 +207,42 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
   if (use_lock && lf) {
     const char *pinned = lockfile_get_commit(lf, name);
     if (pinned) {
-      char cmd[MAX_CMD];
-      snprintf(cmd, sizeof(cmd),
-               "git -C %s fetch --depth=1 origin %s 2>/dev/null", cache_out,
-               pinned);
-      system(cmd);
-      snprintf(cmd, sizeof(cmd), "git -C %s checkout FETCH_HEAD 2>/dev/null",
-               cache_out);
-      system(cmd);
+      Process fetch = {0};
+
+      process_argv_push(&fetch, "git");
+      process_argv_push(&fetch, "-C");
+      process_argv_push(&fetch, cache_out);
+      process_argv_push(&fetch, "fetch");
+      process_argv_push(&fetch, "--depth=1");
+      process_argv_push(&fetch, "origin");
+      process_argv_push(&fetch, pinned);
+      process_run(&fetch);
+      process_free(&fetch);
+
+      Process checkout = {0};
+
+      process_argv_push(&checkout, "git");
+      process_argv_push(&checkout, "-C");
+      process_argv_push(&checkout, cache_out);
+      process_argv_push(&checkout, "checkout");
+      process_argv_push(&checkout, "FETCH_HEAD");
+      process_run(&checkout);
+      process_free(&checkout);
       printf("smelt: pinned %s @ %s\n", name, pinned);
     }
   }
 
   char commit[64] = {0};
-  char cmd[MAX_CMD];
-  snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null", cache_out);
-  FILE *fp = popen(cmd, "r");
-  if (fp) {
-    fgets(commit, sizeof(commit), fp);
-    pclose(fp);
+  Process rev_parse = {0};
+  process_argv_push(&rev_parse, "git");
+  process_argv_push(&rev_parse, "-C");
+  process_argv_push(&rev_parse, cache_out);
+  process_argv_push(&rev_parse, "rev-parse");
+  process_argv_push(&rev_parse, "HEAD");
+  if (process_capture(&rev_parse, commit, sizeof(commit))) {
     commit[strcspn(commit, "\n")] = '\0';
   }
+  process_free(&rev_parse);
 
   if (lf && commit[0])
     lockfile_set(lf, name, url, commit);
@@ -236,12 +316,17 @@ int dep_add_local(const char *path) {
 }
 
 int dep_add_pkgconfig(const char *name) {
-  char cmd[MAX_CMD];
-  snprintf(cmd, sizeof(cmd), "pkg-config --exists %s 2>/dev/null", name);
-  if (system(cmd) != 0) {
+  Process pkg_exists = {0};
+
+  process_argv_push(&pkg_exists, "pkg-config");
+  process_argv_push(&pkg_exists, "--exists");
+  process_argv_push(&pkg_exists, name);
+  if (!process_run(&pkg_exists)) {
     fprintf(stderr, "smelt: pkg-config: %s not found\n", name);
+    process_free(&pkg_exists);
     return 0;
   }
+  process_free(&pkg_exists);
   char entry[MAX_STR * 2];
   snprintf(entry, sizeof(entry), "%s = { pkg-config = \"%s\" }", name, name);
   return toml_write_dep(entry);
@@ -304,74 +389,83 @@ static int ensure_local_dep(Dep *dep, Manifest *m) {
     stringvec_push_unique(&m->include_dirs, inc);
   }
 
-  char cmd[MAX_CMD];
-  snprintf(cmd, sizeof(cmd), "find %s -name '*.c' 2>/dev/null", dep_src);
-  FILE *fp = popen(cmd, "r");
-  if (fp) {
-    char line[MAX_PATH];
-    while (fgets(line, sizeof(line), fp)) {
-      line[strcspn(line, "\n")] = '\0';
+  Process find_c_files = {0};
+
+  process_argv_push(&find_c_files, "find");
+  process_argv_push(&find_c_files, dep_src);
+  process_argv_push(&find_c_files, "-name");
+  process_argv_push(&find_c_files, "*.c");
+
+  char output[65536] = {0};
+
+  if (process_capture(&find_c_files, output, sizeof(output))) {
+    char *saveptr = NULL;
+
+    char *line = strtok_r(output, "\n", &saveptr);
+
+    while (line) {
       if (line[0])
         stringvec_push_unique(&m->dep_sources, line);
+
+      line = strtok_r(NULL, "\n", &saveptr);
     }
-    pclose(fp);
   }
+
+  process_free(&find_c_files);
 
   manifest_free(&dm);
   return 1;
 }
 
 static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
-  if (system("pkg-config --version > /dev/null 2>&1") != 0) {
-    fprintf(stderr, "smelt: pkg-config not found\n");
-    return 0;
-  }
+  Process proc = {0};
 
-  char cmd[MAX_CMD];
-  snprintf(cmd, sizeof(cmd), "pkg-config --exists %s 2>/dev/null",
-           dep->pkg_config);
-  if (system(cmd) != 0) {
+  process_argv_push(&proc, "pkg-config");
+  process_argv_push(&proc, "--exists");
+  process_argv_push(&proc, dep->pkg_config);
+
+  if (!process_run(&proc)) {
     fprintf(stderr, "smelt: pkg-config: %s not found\n", dep->pkg_config);
-    fprintf(stderr, "smelt: try installing %s with your system package manager",
+
+    fprintf(stderr,
+            "smelt: try installing %s with your system package manager\n",
             dep->pkg_config);
+
+    process_free(&proc);
+
     return 0;
   }
 
-  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>/dev/null",
-           dep->pkg_config);
-  FILE *fp = popen(cmd, "r");
-  if (fp) {
-    char cflags[4096] = {0};
-    fgets(cflags, sizeof(cflags), fp);
-    pclose(fp);
-    cflags[strcspn(cflags, "\n")] = '\0';
-    char *tok = strtok(cflags, " ");
-    while (tok) {
-      if (strncmp(tok, "-I", 2) == 0)
-        stringvec_push_unique(&m->include_dirs, tok + 2);
-      else if (strncmp(tok, "-D", 2) == 0)
-        stringvec_push_unique(&m->defines, tok + 2);
-      tok = strtok(NULL, " ");
-    }
+  process_free(&proc);
+
+  Process cflags = {0};
+
+  process_argv_push(&cflags, "pkg-config");
+  process_argv_push(&cflags, "--cflags");
+  process_argv_push(&cflags, dep->pkg_config);
+
+  if (!process_capture_lines(&cflags, parse_pkgconfig_cflags, m)) {
+    process_free(&cflags);
+    return 0;
   }
 
-  snprintf(cmd, sizeof(cmd), "pkg-config --libs %s 2>/dev/null",
-           dep->pkg_config);
-  fp = popen(cmd, "r");
-  if (fp) {
-    char libs[4096] = {0};
-    fgets(libs, sizeof(libs), fp);
-    pclose(fp);
-    libs[strcspn(libs, "\n")] = '\0';
+  process_free(&cflags);
 
-    char *tok = strtok(libs, " ");
-    while (tok) {
-      stringvec_push_unique(&m->link_flags, tok);
-      tok = strtok(NULL, " ");
-    }
+  Process libs = {0};
+
+  process_argv_push(&libs, "pkg-config");
+  process_argv_push(&libs, "--libs");
+  process_argv_push(&libs, dep->pkg_config);
+
+  if (!process_capture_lines(&libs, parse_pkgconfig_libs, m)) {
+    process_free(&libs);
+    return 0;
   }
+
+  process_free(&libs);
 
   printf("smelt: pkg-config: resolved %s\n", dep->pkg_config);
+
   return 1;
 }
 
@@ -387,31 +481,55 @@ int deps_update(Manifest *m) {
     } else if (dep->git[0]) {
       char cache[MAX_PATH];
 
-      char cmd[MAX_CMD];
       char name[MAX_NAME];
       repo_name(name, sizeof(name), dep->git);
       char cache_dir[MAX_PATH];
       cache_path(cache_dir, sizeof(cache_dir), name);
 
       if (dir_exists(cache_dir)) {
-        snprintf(cmd, sizeof(cmd),
-                 "git -C %s fetch --depth=1 origin HEAD 2>/dev/null && git -C "
-                 "%s reset --hard FETCH_HEAD 2>/dev/null",
-                 cache_dir, cache_dir);
+        Process fetch = {0};
+
+        process_argv_push(&fetch, "git");
+        process_argv_push(&fetch, "-C");
+        process_argv_push(&fetch, cache_dir);
+        process_argv_push(&fetch, "fetch");
+        process_argv_push(&fetch, "--depth=1");
+        process_argv_push(&fetch, "origin");
+        process_argv_push(&fetch, "HEAD");
+
+        if (process_run(&fetch)) {
+          Process reset = {0};
+
+          process_argv_push(&reset, "git");
+          process_argv_push(&reset, "-C");
+          process_argv_push(&reset, cache_dir);
+          process_argv_push(&reset, "reset");
+          process_argv_push(&reset, "--hard");
+          process_argv_push(&reset, "FETCH_HEAD");
+
+          if (!process_run(&reset)) {
+            process_free(&reset);
+            return 0;
+          }
+          process_free(&reset);
+        }
+        process_free(&fetch);
         printf("smelt: updating %s\n", name);
-        system(cmd);
         snprintf(cache, sizeof(cache), "%s", cache_dir);
       }
 
+      Process parse_commit = {0};
+
+      process_argv_push(&parse_commit, "git");
+      process_argv_push(&parse_commit, "-C");
+      process_argv_push(&parse_commit, cache_dir);
+      process_argv_push(&parse_commit, "rev-parse");
+      process_argv_push(&parse_commit, "HEAD");
       char commit[64] = {0};
-      snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null",
-               cache_dir);
-      FILE *fp = popen(cmd, "r");
-      if (fp) {
-        fgets(commit, sizeof(commit), fp);
-        pclose(fp);
+      if (process_capture(&parse_commit, commit, sizeof(commit))) {
         commit[strcspn(commit, "\n")] = '\0';
       }
+      process_free(&parse_commit);
 
       if (commit[0]) {
         lockfile_set(&lf, name, dep->git, commit);
