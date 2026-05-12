@@ -1,7 +1,7 @@
 #ifndef SMELT_LOCK_H
 #define SMELT_LOCK_H
 
-#include "manifest.h"
+#include "project/manifest.h"
 
 #define MAX_LOCK_ENTRIES 64
 #define LOCK_FILE "smelt.lock"

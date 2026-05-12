@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
-#include "deps.h"
-#include "lock.h"
-#include "manifest.h"
+#include "pkg/deps.h"
+#include "project/lock.h"
+#include "project/manifest.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

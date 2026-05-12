@@ -3,7 +3,7 @@
 
 #define MAX_CMD 16384
 
-#include "manifest.h"
+#include "project/manifest.h"
 
 int deps_ensure(Manifest *m);
 int deps_update(Manifest *m);

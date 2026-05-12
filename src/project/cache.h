@@ -1,7 +1,7 @@
 #ifndef SMELT_CACHE_H
 #define SMELT_CACHE_H
 
-#include "build.h"
+#include "cmd/build.h"
 #include <stddef.h>
 
 #define MAX_HASH 65

@@ -1,6 +1,6 @@
-#include "compdb.h"
-#include "build.h"
-#include "manifest.h"
+#include "project/compdb.h"
+#include "cmd/build.h"
+#include "project/manifest.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

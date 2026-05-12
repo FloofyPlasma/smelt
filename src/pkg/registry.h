@@ -1,7 +1,7 @@
 #ifndef SMELT_REGISTRY_C
 #define SMELT_REGISTRY_C
 
-#include "manifest.h"
+#include "project/manifest.h"
 #include <stddef.h>
 
 typedef struct {

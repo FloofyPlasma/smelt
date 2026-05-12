@@ -1,5 +1,5 @@
-#include "clean.h"
-#include "manifest.h"
+#include "cmd/clean.h"
+#include "project/manifest.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,5 +1,5 @@
-#include "registry.h"
-#include "deps.h"
+#include "pkg/registry.h"
+#include "pkg/deps.h"
 #include "tomlc17.h"
 #include <stdio.h>
 #include <stdlib.h>

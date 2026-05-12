@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
-#include "build.h"
-#include "cache.h"
-#include "manifest.h"
+#include "cmd/build.h"
+#include "project/cache.h"
+#include "project/manifest.h"
 #include "xxhash.h"
 #include <dirent.h>
 #include <stdio.h>

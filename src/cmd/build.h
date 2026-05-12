@@ -1,7 +1,7 @@
 #ifndef SMELT_BUILD_H
 #define SMELT_BUILD_H
 
-#include "manifest.h"
+#include "project/manifest.h"
 
 #define MAX_SOURCES 512
 #define MAX_OBJ_PATH (MAX_PATH * 2)

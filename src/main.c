@@ -1,10 +1,10 @@
-#include "build.h"
-#include "clean.h"
-#include "compdb.h"
-#include "deps.h"
-#include "init.h"
-#include "manifest.h"
-#include "registry.h"
+#include "cmd/build.h"
+#include "cmd/clean.h"
+#include "cmd/init.h"
+#include "pkg/deps.h"
+#include "pkg/registry.h"
+#include "project/compdb.h"
+#include "project/manifest.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

@@ -1,4 +1,4 @@
-#include "manifest.h"
+#include "project/manifest.h"
 #include "tomlc17.h"
 #include <stdio.h>
 #include <string.h>
