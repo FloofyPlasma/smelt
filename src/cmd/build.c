@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
 #include "project/cache.h"
+#include "cmd/ccflags.h"
 #include "project/manifest.h"
 #include "xxhash.h"
 #include <dirent.h>
@@ -65,6 +66,7 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
 
   XXH3_64bits_update(state, flags, strlen(flags));
 
+  // Hash source file
   FILE *fp = fopen(src, "rb");
   if (!fp) {
     XXH3_freeState(state);
@@ -123,11 +125,13 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
 int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   BuildCtx ctx = {0};
 
+  // Find compiler
   const char *cc = getenv("CC");
   if (!cc || cc[0] == '\0')
     cc = "gcc";
   snprintf(ctx.compiler, sizeof(ctx.compiler), "%s", cc);
 
+  // Gather sources
   if (!scan_dir(&ctx, m->src_dir))
     return 0;
 
@@ -147,23 +151,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   ensure_dir(m->out_dir);
 
-  char flags[4096] = {0};
-  int fpos = 0;
-  if (m->c_standard[0])
-    fpos +=
-        snprintf(flags + fpos, sizeof(flags) - fpos, "-std=%s ", m->c_standard);
-  if (strcmp(m->warnings, "all") == 0)
-    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-Wall -Wextra ");
-  for (int i = 0; i < m->include_count; i++)
-    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "-I%s ",
-                     m->include_dirs[i]);
-  for (int i = 0; i < m->define_count; i++)
-    fpos +=
-        snprintf(flags + fpos, sizeof(flags) - fpos, "-D%s ", m->defines[i]);
-  const Profile *prof =
-      ((strcmp(profile, "release") == 0) ? &m->release : &m->debug);
-  for (int i = 0; i < prof->flag_count; i++)
-    fpos += snprintf(flags + fpos, sizeof(flags) - fpos, "%s ", prof->flags[i]);
+  char cmdline[4096] = {0};
+  ccflags_write_command_line(m, profile, cmdline, sizeof(cmdline), 0);
 
   printf("smelt: profile=%s\n", profile);
 
@@ -182,7 +171,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   cache_load(&cache);
 
   char flags_hash[MAX_HASH];
-  cache_hash_str(flags, flags_hash, sizeof(flags_hash));
+  cache_hash_str(cmdline, flags_hash, sizeof(flags_hash));
   int flags_changed = strcmp(flags_hash, cache.flags_hash) != 0 ||
                       strcmp(compiler_ver, cache.compiler_ver) != 0;
   if (flags_changed)
@@ -203,7 +192,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
       obj_files[i][olen - 1] = 'o';
 
     new_hashes[i][0] = '\0';
-    hash_source_and_deps(src, m->out_dir, flags, new_hashes[i], MAX_HASH);
+    hash_source_and_deps(src, m->out_dir, cmdline, new_hashes[i], MAX_HASH);
 
     const char *old_hash = cache_get(&cache, src);
     needs_compile[i] =
@@ -220,7 +209,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     }
 
     char cmd[MAX_CMD] = {0};
-    snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, flags,
+    snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, cmdline,
              ctx.sources[i], obj_files[i]);
     printf("smelt: %s\n", cmd);
 
@@ -255,7 +244,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     if (!needs_compile[i])
       continue;
     char final_hash[MAX_HASH] = {0};
-    hash_source_and_deps(ctx.sources[i], m->out_dir, flags, final_hash,
+    hash_source_and_deps(ctx.sources[i], m->out_dir, cmdline, final_hash,
                          MAX_HASH);
     cache_set(&cache, ctx.sources[i], final_hash);
   }
@@ -284,6 +273,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
       fprintf(stderr, "smelt: link failed\n");
       return 0;
     }
+    printf("smelt: Build success!\n");
     printf("smelt: built %s\n", output);
   } else {
     printf("smelt: nothing to build\n");

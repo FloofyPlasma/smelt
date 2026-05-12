@@ -1,8 +1,8 @@
 #include "project/compdb.h"
 #include "cmd/build.h"
+#include "cmd/ccflags.h"
 #include "project/manifest.h"
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 
 int compdb_write(const Manifest *m, const BuildCtx *ctx) {
@@ -19,21 +19,8 @@ int compdb_write(const Manifest *m, const BuildCtx *ctx) {
     return 0;
   }
 
-  char flags[4096] = {0};
-  int pos = 0;
-
-  pos += snprintf(flags + pos, sizeof(flags) - pos, "%s", ctx->compiler);
-
-  if (m->c_standard[0])
-    pos +=
-        snprintf(flags + pos, sizeof(flags) - pos, " -std=%s", m->c_standard);
-
-  if (strcmp(m->warnings, "all") == 0)
-    pos += snprintf(flags + pos, sizeof(flags) - pos, " -Wall -Wextra");
-
-  for (int i = 0; i < m->include_count; i++)
-    pos += snprintf(flags + pos, sizeof(flags) - pos, " -I%s/%s", cwd,
-                    m->include_dirs[i]);
+  char cmdline[4096] = {0};
+  ccflags_write_command_line(m, NULL, cmdline, sizeof(cmdline), 1);
 
   char extra[2048] = {0};
   int epos = 0;
@@ -49,7 +36,7 @@ int compdb_write(const Manifest *m, const BuildCtx *ctx) {
             "    \"command\": \"%s %s/%s%s\",\n"
             "    \"file\": \"%s/%s\"\n"
             "  }%s\n",
-            cwd, flags, cwd, ctx->sources[i], extra, cwd, ctx->sources[i],
+            cwd, cmdline, cwd, ctx->sources[i], extra, cwd, ctx->sources[i],
             i < ctx->source_count - 1 ? "," : "");
   }
   fprintf(fp, "]\n");

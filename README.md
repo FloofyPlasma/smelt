@@ -19,8 +19,8 @@ A fast, simple build tool for C projects. Inspired by cargo. Just add a `smelt.t
 git clone https://github.com/floofyplasma/smelt
 cd smelt
 gcc src/main.c src/manifest.c src/build.c src/cache.c src/deps.c src/lock.c \
-    src/compdb.c src/init.c src/clean.c vendor/xxhash.c vendor/tomlc17.c \
-    -Isrc -Ivendor -std=c17 -o smelt
+    src/compdb.c src/init.c src/clean.c src/registry.c vendor/xxhash.c \
+    vendor/tomlc17.c -Isrc -Ivendor -std=c17 -o smelt
 ```
 
 ## Usage

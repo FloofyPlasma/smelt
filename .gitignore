@@ -1,4 +1,5 @@
 smelt
+compile_commands.json
 build/
 *.o
 *.d
