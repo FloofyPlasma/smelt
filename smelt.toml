@@ -1,6 +1,6 @@
 [package]
 name = "smelt"
-version = "0.2.0"
+version = "0.3.0"
 
 [build]
 c_standard = "c17"
@@ -8,9 +8,9 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 link_flags = ["-lm"]
-defines = ["VERSION=\"0.2.0\""]
+defines = ["VERSION=\"0.3.0\""]
 include_dirs = ["src", "vendor"]
-extra_sources = ["vendor/tomlc17.c", "vendor/xxhash.c"]
+extra_sources = []
 
 [profile.debug]
 flags = ["-g", "-O0"]
