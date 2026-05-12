@@ -10,16 +10,22 @@ int ccflags_write_command_line(const Manifest *manifest, const char *profile,
                      manifest->c_standard);
   if (strcmp(manifest->warnings, "all") == 0)
     fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "-Wall -Wextra ");
-  for (int i = 0; i < manifest->include_count; i++)
+
+  for (size_t i = 0; i < manifest->include_dirs.len; i++)
     fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "-I%s ",
-                     manifest->include_dirs[i]);
-  for (int i = 0; i < (no_defines ? 0 : manifest->define_count); i++)
-    fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "-D%s ",
-                     manifest->defines[i]);
-  const Profile *prof =
-      ((profile != NULL && strcmp(profile, "release") == 0) ? &manifest->release
-                                                            : &manifest->debug);
-  for (int i = 0; i < prof->flag_count; i++)
-    fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "%s ", prof->flags[i]);
+                     stringvec_get(&manifest->include_dirs, i));
+
+  if (!no_defines)
+    for (size_t i = 0; i < manifest->defines.len; i++)
+      fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "-D%s ",
+                       stringvec_get(&manifest->defines, i));
+
+  const Profile *prof = (profile && strcmp(profile, "release") == 0)
+                            ? &manifest->release
+                            : &manifest->debug;
+  for (size_t i = 0; i < prof->flags.len; i++)
+    fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "%s ",
+                     stringvec_get(&prof->flags, i));
+
   return fpos;
 }

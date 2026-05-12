@@ -24,20 +24,21 @@ int compdb_write(const Manifest *m, const BuildCtx *ctx) {
 
   char extra[2048] = {0};
   int epos = 0;
-  for (int i = 0; i < m->extra_count; i++)
+  for (size_t i = 0; i < stringvec_len(&m->extra_sources); i++)
     epos += snprintf(extra + epos, sizeof(extra) - epos, " %s/%s", cwd,
-                     m->extra_sources[i]);
+                     stringvec_get(&m->extra_sources, i));
 
   fprintf(fp, "[\n");
-  for (int i = 0; i < ctx->source_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&ctx->sources); i++) {
+    const char *src = stringvec_get(&ctx->sources, i);
     fprintf(fp,
             "  {\n"
             "    \"directory\": \"%s\",\n"
             "    \"command\": \"%s %s/%s%s\",\n"
             "    \"file\": \"%s/%s\"\n"
             "  }%s\n",
-            cwd, cmdline, cwd, ctx->sources[i], extra, cwd, ctx->sources[i],
-            i < ctx->source_count - 1 ? "," : "");
+            cwd, cmdline, cwd, src, extra, cwd, src,
+            i < stringvec_len(&ctx->sources) - 1 ? "," : "");
   }
   fprintf(fp, "]\n");
 

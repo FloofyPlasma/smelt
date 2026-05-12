@@ -170,7 +170,7 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
   return 1;
 }
 
-int dep_add_git(const char *url, const char **files, int file_count) {
+int dep_add_git(const char *url, const StringVec *files) {
   LockFile lf;
   lockfile_load(&lf);
 
@@ -183,20 +183,22 @@ int dep_add_git(const char *url, const char **files, int file_count) {
   char files_str[4096] = {0};
   int fpos = 0;
   fpos += snprintf(files_str + fpos, sizeof(files_str) - fpos, "[");
-  for (int i = 0; i < file_count; i++) {
+  for (size_t i = 0; i < stringvec_len(files); i++) {
     fpos += snprintf(files_str + fpos, sizeof(files_str) - fpos, "\"%s\"%s",
-                     files[i], i < file_count - 1 ? ", " : "");
+                     stringvec_get(files, i),
+                     i < stringvec_len(files) - 1 ? ", " : "");
   }
   snprintf(files_str + fpos, sizeof(files_str) - fpos, "]");
 
-  for (int i = 0; i < file_count; i++) {
+  for (size_t i = 0; i < stringvec_len(files); i++) {
+    const char *f = stringvec_get(files, i);
     char src[MAX_PATH * 2];
-    snprintf(src, sizeof(src), "%s/%s", cache, files[i]);
+    snprintf(src, sizeof(src), "%s/%s", cache, f);
     char dst[MAX_PATH];
-    snprintf(dst, sizeof(dst), "vendor/%s", base_name(files[i]));
+    snprintf(dst, sizeof(dst), "vendor/%s", f);
     if (!copy_file(src, dst))
       return 0;
-    printf("smelt: copied %s -> %s\n", files[i], dst);
+    printf("smelt: copied %s -> %s\n", f, dst);
   }
 
   char name[MAX_NAME];
@@ -253,10 +255,11 @@ static int ensure_git_dep(Dep *dep, Manifest *m, LockFile *lf) {
   mkdir("vendor", 0755);
 
   int vendor_added = 0;
-  for (int i = 0; i < dep->file_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&dep->files); i++) {
+    const char *f = stringvec_get(&dep->files, i);
     char src[MAX_PATH * 2];
-    snprintf(src, sizeof(src), "%s/%s", cache, dep->files[i]);
-    const char *fname = base_name(dep->files[i]);
+    snprintf(src, sizeof(src), "%s/%s", cache, f);
+    const char *fname = base_name(f);
     char dst[MAX_PATH];
     snprintf(dst, sizeof(dst), "vendor/%s", fname);
 
@@ -266,31 +269,14 @@ static int ensure_git_dep(Dep *dep, Manifest *m, LockFile *lf) {
       printf("smelt: vendored %s\n", dst);
     }
 
-    if (ends_with_c(fname) && m->extra_count < MAX_EXTRA) {
-      int found = 0;
-      for (int j = 0; j < m->extra_count; j++)
-        if (strcmp(m->extra_sources[j], dst) == 0) {
-          found = 1;
-          break;
-        }
-      if (!found)
-        snprintf(m->extra_sources[m->extra_count++],
-                 sizeof(m->extra_sources[0]), "%s", dst);
-    }
+    if (ends_with_c(fname))
+      stringvec_push_unique(&m->extra_sources, dst);
+
     vendor_added = 1;
   }
 
-  if (vendor_added && m->include_count < MAX_INCLUDES) {
-    int found = 0;
-    for (int i = 0; i < m->include_count; i++)
-      if (strcmp(m->include_dirs[i], "vendor") == 0) {
-        found = 1;
-        break;
-      }
-    if (!found)
-      snprintf(m->include_dirs[m->include_count++], sizeof(m->include_dirs[0]),
-               "vendor");
-  }
+  if (vendor_added)
+    stringvec_push_unique(&m->include_dirs, "vendor");
 
   return 1;
 }
@@ -309,31 +295,13 @@ static int ensure_local_dep(Dep *dep, Manifest *m) {
 
   char dep_src[MAX_PATH];
   snprintf(dep_src, sizeof(dep_src), "%s/%s", dep->path, dm.src_dir);
+  stringvec_push_unique(&m->include_dirs, dep_src);
 
-  if (m->include_count < MAX_INCLUDES) {
-    int found = 0;
-    for (int i = 0; i < m->include_count; i++)
-      if (strcmp(m->include_dirs[i], dep_src) == 0) {
-        found = 1;
-        break;
-      }
-    if (!found)
-      snprintf(m->include_dirs[m->include_count++], sizeof(m->include_dirs[0]),
-               "%s", dep_src);
-  }
-
-  for (int i = 0; i < dm.include_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&dm.include_dirs); i++) {
     char inc[MAX_PATH];
-    snprintf(inc, sizeof(inc), "%s/%s", dep->path, dm.include_dirs[i]);
-    int found = 0;
-    for (int j = 0; j < m->include_count; j++)
-      if (strcmp(m->include_dirs[j], inc) == 0) {
-        found = 1;
-        break;
-      }
-    if (!found && m->include_count < MAX_INCLUDES)
-      snprintf(m->include_dirs[m->include_count++], sizeof(m->include_dirs[0]),
-               "%s", inc);
+    snprintf(inc, sizeof(inc), "%s/%s", dep->path,
+             stringvec_get(&dm.include_dirs, i));
+    stringvec_push_unique(&m->include_dirs, inc);
   }
 
   char cmd[MAX_CMD];
@@ -343,20 +311,13 @@ static int ensure_local_dep(Dep *dep, Manifest *m) {
     char line[MAX_PATH];
     while (fgets(line, sizeof(line), fp)) {
       line[strcspn(line, "\n")] = '\0';
-      if (line[0] == '\0')
-        continue;
-      int found = 0;
-      for (int i = 0; i < m->dep_source_count; i++)
-        if (strcmp(m->dep_sources[i], line) == 0) {
-          found = 1;
-          break;
-        }
-      if (!found && m->dep_source_count < MAX_DEP_SOURCES)
-        snprintf(m->dep_sources[m->dep_source_count++],
-                 sizeof(m->dep_sources[0]), "%s", line);
+      if (line[0])
+        stringvec_push_unique(&m->dep_sources, line);
     }
     pclose(fp);
   }
+
+  manifest_free(&dm);
   return 1;
 }
 
@@ -384,34 +345,12 @@ static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
     fgets(cflags, sizeof(cflags), fp);
     pclose(fp);
     cflags[strcspn(cflags, "\n")] = '\0';
-
     char *tok = strtok(cflags, " ");
     while (tok) {
-      if (strncmp(tok, "-I", 2) == 0) {
-        if (m->include_count < MAX_INCLUDES) {
-          int found = 0;
-          for (int i = 0; i < m->include_count; i++)
-            if (strcmp(m->include_dirs[i], tok + 2) == 0) {
-              found = 1;
-              break;
-            }
-          if (!found)
-            snprintf(m->include_dirs[m->include_count++],
-                     sizeof(m->include_dirs[0]), "%s", tok + 2);
-        }
-      } else if (strncmp(tok, "-D", 2) == 0) {
-        if (m->define_count < MAX_DEFINES) {
-          int found = 0;
-          for (int i = 0; i < m->define_count; i++)
-            if (strcmp(m->defines[i], tok + 2) == 0) {
-              found = 1;
-              break;
-            }
-          if (!found)
-            snprintf(m->defines[m->define_count++], sizeof(m->defines[0]), "%s",
-                     tok + 2);
-        }
-      }
+      if (strncmp(tok, "-I", 2) == 0)
+        stringvec_push_unique(&m->include_dirs, tok + 2);
+      else if (strncmp(tok, "-D", 2) == 0)
+        stringvec_push_unique(&m->defines, tok + 2);
       tok = strtok(NULL, " ");
     }
   }
@@ -427,17 +366,7 @@ static int ensure_pkgconfig_dep(Dep *dep, Manifest *m) {
 
     char *tok = strtok(libs, " ");
     while (tok) {
-      if (m->link_flag_count < MAX_LINK_FLAGS) {
-        int found = 0;
-        for (int i = 0; i < m->link_flag_count; i++)
-          if (strcmp(m->link_flags[i], tok) == 0) {
-            found = 1;
-            break;
-          }
-        if (!found)
-          snprintf(m->link_flags[m->link_flag_count++],
-                   sizeof(m->link_flags[0]), "%s", tok);
-      }
+      stringvec_push_unique(&m->link_flags, tok);
       tok = strtok(NULL, " ");
     }
   }

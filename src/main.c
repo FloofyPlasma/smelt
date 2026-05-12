@@ -59,11 +59,17 @@ int main(int argc, char **argv) {
     BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!deps_ensure(&m))
+    if (!deps_ensure(&m)) {
+      manifest_free(&m);
       return 1;
-    if (!build_run(&m, &ctx, profile))
+    }
+    if (!build_run(&m, &ctx, profile)) {
+      manifest_free(&m);
       return 1;
+    }
     compdb_write(&m, &ctx);
+    buildctx_free(&ctx);
+    manifest_free(&m);
     return 0;
   }
 
@@ -84,10 +90,14 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    if (!deps_ensure(&m))
+    if (!deps_ensure(&m)) {
+      manifest_free(&m);
       return 1;
-    if (!build_run(&m, NULL, profile))
+    }
+    if (!build_run(&m, NULL, profile)) {
+      manifest_free(&m);
       return 1;
+    }
 
     char output[MAX_PATH * 2];
     snprintf(output, sizeof(output), "%s/%s", m.out_dir, m.name);
@@ -101,6 +111,7 @@ int main(int argc, char **argv) {
     }
     child_args[child_argc] = NULL;
 
+    manifest_free(&m);
     execv(output, child_args);
     perror("smelt: execv failed");
     return 1;
@@ -110,7 +121,10 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    return clean_run(&m) ? 0 : 1;
+    int ok = clean_run(&m);
+
+    manifest_free(&m);
+    return ok ? 0 : 1;
   }
 
   if (strcmp(argv[1], "init") == 0) {
@@ -157,9 +171,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");
         return 1;
       }
-      const char **files = (const char **)&argv[3];
-      int file_count = argc - 3;
-      return dep_add_git(target, files, file_count) ? 0 : 1;
+      StringVec files = {0};
+      for (int i = 3; i < argc; i++)
+        stringvec_push(&files, argv[i]);
+      int ok = dep_add_git(target, &files);
+      stringvec_free(&files);
+      return ok ? 0 : 1;
     }
 
     Manifest m = {0};
@@ -172,7 +189,10 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
-    return deps_update(&m) ? 0 : 1;
+    int ok = deps_update(&m);
+
+    manifest_free(&m);
+    return ok ? 0 : 1;
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);

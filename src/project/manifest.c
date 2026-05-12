@@ -1,5 +1,6 @@
 #include "project/manifest.h"
 #include "tomlc17.h"
+#include <bits/types/locale_t.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,22 +12,22 @@ static void parse_profile(toml_datum_t root, const char *key, Profile *out) {
   toml_datum_t arr = toml_seek(root, key);
   if (arr.type != TOML_ARRAY)
     return;
-  for (int i = 0; i < arr.u.arr.size && i < MAX_PROFILE_FLAGS; i++) {
+  for (int i = 0; i < arr.u.arr.size; i++) {
     toml_datum_t e = arr.u.arr.elem[i];
     if (e.type == TOML_STRING)
-      scopy(out->flags[out->flag_count++], sizeof(out->flags[0]), e.u.s);
+      stringvec_push(&out->flags, e.u.s);
   }
 }
 
 static void parse_str_array(toml_datum_t root, const char *key,
-                            char dst[][MAX_PATH], int *count, int max) {
+                            StringVec *out) {
   toml_datum_t arr = toml_seek(root, key);
   if (arr.type != TOML_ARRAY)
     return;
-  for (int i = 0; i < arr.u.arr.size && i < max; i++) {
+  for (int i = 0; i < arr.u.arr.size; i++) {
     toml_datum_t e = arr.u.arr.elem[i];
     if (e.type == TOML_STRING)
-      scopy(dst[(*count)++], MAX_PATH, e.u.s);
+      stringvec_push(out, e.u.s);
   }
 }
 
@@ -63,14 +64,10 @@ int manifest_load(const char *path, Manifest *out) {
   if (odir.type == TOML_STRING)
     scopy(out->out_dir, sizeof(out->out_dir), odir.u.s);
 
-  parse_str_array(t, "build.include_dirs", out->include_dirs,
-                  &out->include_count, MAX_INCLUDES);
-  parse_str_array(t, "build.extra_sources", out->extra_sources,
-                  &out->extra_count, MAX_EXTRA);
-  parse_str_array(t, "build.link_flags", out->link_flags, &out->link_flag_count,
-                  MAX_LINK_FLAGS);
-  parse_str_array(t, "build.defines", out->defines, &out->define_count,
-                  MAX_DEFINES);
+  parse_str_array(t, "build.include_dirs", &out->include_dirs);
+  parse_str_array(t, "build.extra_sources", &out->extra_sources);
+  parse_str_array(t, "build.link_flags", &out->link_flags);
+  parse_str_array(t, "build.defines", &out->defines);
 
   if (out->src_dir[0] == '\0')
     scopy(out->src_dir, sizeof(out->src_dir), "src");
@@ -80,15 +77,15 @@ int manifest_load(const char *path, Manifest *out) {
   parse_profile(t, "profile.debug.flags", &out->debug);
   parse_profile(t, "profile.release.flags", &out->release);
 
-  if (out->debug.flag_count == 0) {
-    scopy(out->debug.flags[0], MAX_STR, "-g");
-    scopy(out->debug.flags[1], MAX_STR, "-O0");
-    out->debug.flag_count = 2;
+  if (stringvec_len(&out->debug.flags) == 0) {
+    stringvec_grow(&out->debug.flags, 2);
+    stringvec_push(&out->debug.flags, "-g");
+    stringvec_push(&out->debug.flags, "-O0");
   }
-  if (out->release.flag_count == 0) {
-    scopy(out->release.flags[0], MAX_STR, "-O3");
-    scopy(out->release.flags[1], MAX_STR, "-DNDEBUG");
-    out->release.flag_count = 2;
+  if (stringvec_len(&out->release.flags) == 0) {
+    stringvec_grow(&out->release.flags, 2);
+    stringvec_push(&out->release.flags, "-O3");
+    stringvec_push(&out->release.flags, "-DNDEBUG");
   }
 
   // [dependencies]
@@ -122,8 +119,7 @@ int manifest_load(const char *path, Manifest *out) {
         for (int j = 0; j < files.u.arr.size && j < MAX_DEP_FILES; j++) {
           toml_datum_t f = files.u.arr.elem[j];
           if (f.type == TOML_STRING)
-            snprintf(dep->files[dep->file_count++], sizeof(dep->files[0]), "%s",
-                     f.u.s);
+            stringvec_push(&dep->files, f.u.s);
         }
       }
 
@@ -139,17 +135,30 @@ int manifest_load(const char *path, Manifest *out) {
     for (int i = 0; i < regs.u.arr.size && i < MAX_REGISTRIES; i++) {
       toml_datum_t e = regs.u.arr.elem[i];
       if (e.type == TOML_STRING)
-        scopy(out->registries[out->registry_count++],
-              sizeof(out->registries[0]), e.u.s);
+        stringvec_push(&out->registries, e.u.s);
     }
   }
 
-  if (out->registry_count == 0) {
-    scopy(out->registries[out->registry_count++], sizeof(out->registries[0]),
-          "https://raw.githubusercontent.com/floofyplasma/smelt-registry/main/"
-          "recipes");
+  if (stringvec_len(&out->registries) == 0) {
+    stringvec_push(
+        &out->registries,
+        "https://raw.githubusercontent.com/floofyplasma/smelt-registry/main/"
+        "recipes");
   }
 
   toml_free(result);
   return 1;
+}
+
+void manifest_free(Manifest *m) {
+  for (int i = 0; i < m->dep_count; i++)
+    stringvec_free(&m->deps[i].files);
+  stringvec_free(&m->extra_sources);
+  stringvec_free(&m->include_dirs);
+  stringvec_free(&m->link_flags);
+  stringvec_free(&m->defines);
+  stringvec_free(&m->dep_sources);
+  stringvec_free(&m->registries);
+  stringvec_free(&m->debug.flags);
+  stringvec_free(&m->release.flags);
 }

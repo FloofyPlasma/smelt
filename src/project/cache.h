@@ -1,9 +1,10 @@
 #ifndef SMELT_CACHE_H
 #define SMELT_CACHE_H
 
-#include "cmd/build.h"
+#include "project/manifest.h"
 #include <stddef.h>
 
+#define MAX_SOURCES 512
 #define MAX_HASH 65
 
 typedef struct {

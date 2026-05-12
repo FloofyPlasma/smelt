@@ -1,15 +1,12 @@
 #ifndef SMELT_MANIFEST_H
 #define SMELT_MANIFEST_H
 
+#include "core/stringvec.h"
+
 #define MAX_NAME 128
 #define MAX_STR 256
 #define MAX_PATH 1024
 #define MAX_DEPS 64
-#define MAX_EXTRA 16
-#define MAX_INCLUDES 32
-#define MAX_PROFILE_FLAGS 32
-#define MAX_LINK_FLAGS 32
-#define MAX_DEFINES 32
 #define MAX_DEP_FILES 16
 #define MAX_DEP_SOURCES 256
 #define MAX_REGISTRIES 8
@@ -19,15 +16,14 @@ typedef struct {
   char git[MAX_STR];
   char path[MAX_PATH];
   char pkg_config[MAX_NAME];
-  char files[MAX_DEP_FILES][MAX_PATH];
+  StringVec files;
   int file_count;
   int is_local;
   int is_smelt_aware;
 } Dep;
 
 typedef struct {
-  char flags[MAX_PROFILE_FLAGS][MAX_STR];
-  int flag_count;
+  StringVec flags;
 } Profile;
 
 typedef struct {
@@ -39,22 +35,17 @@ typedef struct {
   char out_dir[MAX_PATH];
   Dep deps[MAX_DEPS];
   int dep_count;
-  char extra_sources[MAX_EXTRA][MAX_PATH];
-  int extra_count;
-  char include_dirs[MAX_INCLUDES][MAX_PATH];
-  int include_count;
+  StringVec extra_sources;
+  StringVec include_dirs;
   Profile debug;
   Profile release;
-  char link_flags[MAX_LINK_FLAGS][MAX_PATH];
-  int link_flag_count;
-  char defines[MAX_DEFINES][MAX_PATH];
-  int define_count;
-  char dep_sources[MAX_DEP_SOURCES][MAX_PATH];
-  int dep_source_count;
-  char registries[MAX_REGISTRIES][MAX_STR];
-  int registry_count;
+  StringVec link_flags;
+  StringVec defines;
+  StringVec dep_sources;
+  StringVec registries;
 } Manifest;
 
+void manifest_free(Manifest *m);
 int manifest_load(const char *path, Manifest *out);
 
 #endif

@@ -43,13 +43,11 @@ static int scan_dir(BuildCtx *ctx, const char *dir) {
     if (S_ISDIR(st.st_mode)) {
       scan_dir(ctx, path);
     } else if (S_ISREG(st.st_mode) && ends_with_c(entry->d_name)) {
-      if (ctx->source_count >= MAX_SOURCES) {
-        fprintf(stderr, "smelt: too many source files\n");
+      if (!stringvec_push(&ctx->sources, path)) {
+        fprintf(stderr, "smelt: out of memory\n");
         closedir(d);
         return 0;
       }
-      snprintf(ctx->sources[ctx->source_count++], sizeof(ctx->sources[0]), "%s",
-               path);
     }
   }
 
@@ -135,16 +133,14 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   if (!scan_dir(&ctx, m->src_dir))
     return 0;
 
-  for (int i = 0; i < m->dep_source_count; i++) {
-    if (ctx.source_count >= MAX_SOURCES) {
+  for (size_t i = 0; i < stringvec_len(&m->dep_sources); i++) {
+    if (!stringvec_push(&ctx.sources, stringvec_get(&m->dep_sources, i))) {
       fprintf(stderr, "smelt: too many sources\n");
       return 0;
     }
-    snprintf(ctx.sources[ctx.source_count++], sizeof(ctx.sources[0]), "%s",
-             m->dep_sources[i]);
   }
 
-  if (ctx.source_count == 0) {
+  if (stringvec_len(&ctx.sources) == 0) {
     fprintf(stderr, "smelt: no .c files found in %s\n", m->src_dir);
     return 0;
   }
@@ -177,19 +173,23 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   if (flags_changed)
     printf("smelt: flags or compiler changed, full rebuild\n");
 
-  char obj_files[MAX_SOURCES][MAX_OBJ_PATH];
+  StringVec obj_files = {0};
+  stringvec_grow(&obj_files, ctx.sources.len);
   char new_hashes[MAX_SOURCES][MAX_HASH];
   int needs_compile[MAX_SOURCES];
 
-  for (int i = 0; i < ctx.source_count; i++) {
-    const char *src = ctx.sources[i];
+  for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
+    const char *src = stringvec_get(&ctx.sources, i);
 
     const char *base = strrchr(src, '/');
     base = base ? base + 1 : src;
-    snprintf(obj_files[i], MAX_OBJ_PATH, "%s/%s", m->out_dir, base);
-    size_t olen = strlen(obj_files[i]);
+
+    char obj[MAX_OBJ_PATH];
+    snprintf(obj, sizeof(obj), "%s/%s", m->out_dir, base);
+    size_t olen = strlen(obj);
     if (olen > 2)
-      obj_files[i][olen - 1] = 'o';
+      obj[olen - 1] = 'o';
+    stringvec_push(&obj_files, obj);
 
     new_hashes[i][0] = '\0';
     hash_source_and_deps(src, m->out_dir, cmdline, new_hashes[i], MAX_HASH);
@@ -202,15 +202,15 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   pid_t pids[MAX_SOURCES] = {0};
   int any_compiled = 0;
 
-  for (int i = 0; i < ctx.source_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (!needs_compile[i]) {
-      printf("smelt: skip %s (unchanged)\n", ctx.sources[i]);
+      printf("smelt: skip %s (unchanged)\n", stringvec_get(&ctx.sources, i));
       continue;
     }
 
     char cmd[MAX_CMD] = {0};
     snprintf(cmd, sizeof(cmd), "%s %s-MMD -c %s -o %s", ctx.compiler, cmdline,
-             ctx.sources[i], obj_files[i]);
+             stringvec_get(&ctx.sources, i), stringvec_get(&obj_files, i));
     printf("smelt: %s\n", cmd);
 
     pid_t pid = fork();
@@ -227,26 +227,27 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   }
 
   int build_ok = 1;
-  for (int i = 0; i < ctx.source_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (pids[i] == 0)
       continue;
     int status;
     waitpid(pids[i], &status, 0);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-      fprintf(stderr, "smelt: compile failed: %s\n", ctx.sources[i]);
+      fprintf(stderr, "smelt: compile failed: %s\n",
+              stringvec_get(&ctx.sources, i));
       build_ok = 0;
     }
   }
   if (!build_ok)
     return 0;
 
-  for (int i = 0; i < ctx.source_count; i++) {
+  for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (!needs_compile[i])
       continue;
     char final_hash[MAX_HASH] = {0};
-    hash_source_and_deps(ctx.sources[i], m->out_dir, cmdline, final_hash,
-                         MAX_HASH);
-    cache_set(&cache, ctx.sources[i], final_hash);
+    hash_source_and_deps(stringvec_get(&ctx.sources, i), m->out_dir, cmdline,
+                         final_hash, MAX_HASH);
+    cache_set(&cache, stringvec_get(&ctx.sources, i), final_hash);
   }
 
   char output[MAX_PATH * 2];
@@ -256,16 +257,9 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     char cmd[MAX_CMD] = {0};
     int pos = 0;
     pos += snprintf(cmd + pos, sizeof(cmd) - pos, "%s", ctx.compiler);
-
-    for (int i = 0; i < ctx.source_count; i++)
-      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", obj_files[i]);
-
-    for (int i = 0; i < m->extra_count; i++)
-      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->extra_sources[i]);
-
-    for (int i = 0; i < m->link_flag_count; i++)
-      pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", m->link_flags[i]);
-
+    pos += stringvec_join(&obj_files, ' ', cmd, sizeof(cmd), pos);
+    pos += stringvec_join(&m->extra_sources, ' ', cmd, sizeof(cmd), pos);
+    pos += stringvec_join(&m->link_flags, ' ', cmd, sizeof(cmd), pos);
     pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -o %s", output);
     printf("smelt: %s\n", cmd);
 
@@ -287,3 +281,5 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     *ctx_out = ctx;
   return 1;
 }
+
+void buildctx_free(BuildCtx *ctx) { stringvec_free(&ctx->sources); }

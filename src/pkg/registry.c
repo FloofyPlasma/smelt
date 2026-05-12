@@ -6,8 +6,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define MAX_CMD 65536
-
 static void ensure_dirs(const char *path) {
   char tmp[MAX_PATH];
   snprintf(tmp, sizeof(tmp), "%s", path);
@@ -49,8 +47,8 @@ int registry_fetch_recipe(const Manifest *m, const char *name) {
   snprintf(dir, sizeof(dir), "%s/.cache/smelt/recipes", home);
   ensure_dirs(dir);
 
-  for (int i = 0; i < m->registry_count; i++) {
-    const char *base = m->registries[i];
+  for (size_t i = 0; i < stringvec_len(&m->registries); i++) {
+    const char *base = stringvec_get(&m->registries, i);
 
     if (strncmp(base, "file://", 7) == 0) {
       char local[MAX_PATH];
@@ -117,11 +115,10 @@ int recipe_load(const char *path, Recipe *out) {
   if (sys.type == TOML_STRING)
     snprintf(out->build_system, sizeof(out->build_system), "%s", sys.u.s);
   if (args.type == TOML_ARRAY) {
-    for (int i = 0; i < args.u.arr.size && i < 16; i++) {
+    for (int i = 0; i < args.u.arr.size; i++) {
       toml_datum_t a = args.u.arr.elem[i];
       if (a.type == TOML_STRING)
-        snprintf(out->build_args[out->build_arg_count++],
-                 sizeof(out->build_args[0]), "%s", a.u.s);
+        stringvec_push(&out->build_args, a.u.s);
     }
   }
 
@@ -134,11 +131,10 @@ int recipe_load(const char *path, Recipe *out) {
 
   toml_datum_t copy = toml_seek(t, "files.copy");
   if (copy.type == TOML_ARRAY) {
-    for (int i = 0; i < copy.u.arr.size && i < MAX_DEP_FILES; i++) {
+    for (int i = 0; i < copy.u.arr.size; i++) {
       toml_datum_t f = copy.u.arr.elem[i];
       if (f.type == TOML_STRING)
-        snprintf(out->copy_files[out->copy_file_count++],
-                 sizeof(out->copy_files[0]), "%s", f.u.s);
+        stringvec_push(&out->copy_files, f.u.s);
     }
   }
 
@@ -160,14 +156,18 @@ int registry_add(Manifest *m, const char *name) {
   if (r.build_system[0] && strcmp(r.build_system, "none") != 0) {
     fprintf(stderr, "smelt: build system '%s' not yet supported\n",
             r.build_system);
+    recipe_free(&r);
     return 0;
   }
 
   printf("smelt: installing %s @ %s\n", r.name, r.version);
+  int ok = dep_add_git(r.git, &r.copy_files);
 
-  const char *files[MAX_DEP_FILES];
-  for (int i = 0; i < r.copy_file_count; i++)
-    files[i] = r.copy_files[i];
+  recipe_free(&r);
+  return ok;
+}
 
-  return dep_add_git(r.git, files, r.copy_file_count);
+void recipe_free(Recipe *r) {
+  stringvec_free(&r->build_args);
+  stringvec_free(&r->copy_files);
 }
