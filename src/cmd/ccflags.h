@@ -8,6 +8,6 @@
 // If profile is NULL, does not add profile-specific flags
 // TODO(maelstrom): fix string escaping instead of using no_defines
 int ccflags_write_command_line(const Manifest *manifest, const char *profile,
-                                char *cmdline, int cmdlinec, int no_defines);
+                               char *cmdline, int cmdlinec, int no_defines);
 
 #endif

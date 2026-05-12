@@ -16,10 +16,10 @@ int ccflags_write_command_line(const Manifest *manifest, const char *profile,
   for (int i = 0; i < (no_defines ? 0 : manifest->define_count); i++)
     fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "-D%s ",
                      manifest->defines[i]);
-  const Profile *prof = ((profile != NULL && strcmp(profile, "release") == 0) ? &manifest->release
-                                                           : &manifest->debug);
+  const Profile *prof =
+      ((profile != NULL && strcmp(profile, "release") == 0) ? &manifest->release
+                                                            : &manifest->debug);
   for (int i = 0; i < prof->flag_count; i++)
-    fpos +=
-        snprintf(cmdline + fpos, cmdlinec - fpos, "%s ", prof->flags[i]);
+    fpos += snprintf(cmdline + fpos, cmdlinec - fpos, "%s ", prof->flags[i]);
   return fpos;
 }

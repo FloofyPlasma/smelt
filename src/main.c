@@ -10,9 +10,9 @@
 #include <string.h>
 #include <unistd.h>
 
-static const char *help_string = 
-  "usage: smelt <command>\n"
-  "commands: build, run, clean, init, add, update\n";
+static const char *help_string =
+    "usage: smelt <command>\n"
+    "commands: build, run, clean, init, add, update\n";
 
 static const struct option build_longopts[] = {
     {"profile", required_argument, 0, 'p'},
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "       smelt add --pkg-config <package name>\n");
       return 1;
     }
-    
+
     target = argv[2];
 
     if (target[0] == '.' || target[0] == '/') {
