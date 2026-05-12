@@ -28,6 +28,15 @@ static char **process_make_argv(Process *p) {
   return argv;
 }
 
+static int process_wait(pid_t pid) {
+  int status;
+
+  if (waitpid(pid, &status, 0) < 0)
+    return 0;
+
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 void process_free(Process *p) {
   if (!p)
     return;
@@ -89,12 +98,7 @@ int process_run(Process *p) {
 
   free(argv);
 
-  int status;
-
-  if (waitpid(pid, &status, 0) < 0)
-    return 0;
-
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  return process_wait(pid);
 }
 
 int process_capture(Process *p, char *dst, size_t dstsz) {
@@ -159,12 +163,7 @@ int process_capture(Process *p, char *dst, size_t dstsz) {
 
   close(pipefd[0]);
 
-  int status;
-
-  if (waitpid(pid, &status, 0) < 0)
-    return 0;
-
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  return process_wait(pid);
 }
 
 #endif

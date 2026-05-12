@@ -256,24 +256,6 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     any_compiled = 1;
   }
 
-  // TODO(FloofyPlasma): process tracking
-  /*
-  int build_ok = 1;
-  for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
-    if (pids[i] == 0)
-      continue;
-    int status;
-    waitpid(pids[i], &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-      fprintf(stderr, "smelt: compile failed: %s\n",
-              stringvec_get(&ctx.sources, i));
-      build_ok = 0;
-    }
-  }
-  if (!build_ok)
-    return 0;
-  */
-
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     if (!needs_compile[i])
       continue;
