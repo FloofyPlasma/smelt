@@ -12,6 +12,7 @@
 #define MAX_DEFINES 32
 #define MAX_DEP_FILES 16
 #define MAX_DEP_SOURCES 256
+#define MAX_REGISTRIES 8
 
 typedef struct {
   char name[MAX_NAME];
@@ -50,6 +51,8 @@ typedef struct {
   int define_count;
   char dep_sources[MAX_DEP_SOURCES][MAX_PATH];
   int dep_source_count;
+  char registries[MAX_REGISTRIES][MAX_STR];
+  int registry_count;
 } Manifest;
 
 int manifest_load(const char *path, Manifest *out);

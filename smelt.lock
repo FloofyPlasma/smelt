@@ -8,3 +8,7 @@ commit = "218c10f162ba7b89a6eca673f8e42150226d2dc2"
 git = "https://github.com/cyan4973/xxhash"
 commit = "e573d4d2aaeaba0f3e5a0a9a54144a1f2b4b56e7"
 
+[xxHash]
+git = "https://github.com/cyan4973/xxHash"
+commit = "e573d4d2aaeaba0f3e5a0a9a54144a1f2b4b56e7"
+

@@ -133,6 +133,23 @@ int manifest_load(const char *path, Manifest *out) {
     }
   }
 
+  // [registries]
+  toml_datum_t regs = toml_seek(t, "registries.sources");
+  if (regs.type == TOML_ARRAY) {
+    for (int i = 0; i < regs.u.arr.size && i < MAX_REGISTRIES; i++) {
+      toml_datum_t e = regs.u.arr.elem[i];
+      if (e.type == TOML_STRING)
+        scopy(out->registries[out->registry_count++],
+              sizeof(out->registries[0]), e.u.s);
+    }
+  }
+
+  if (out->registry_count == 0) {
+    scopy(out->registries[out->registry_count++], sizeof(out->registries[0]),
+          "https://raw.githubusercontent.com/floofyplasma/smelt-registry/main/"
+          "recipes");
+  }
+
   toml_free(result);
   return 1;
 }

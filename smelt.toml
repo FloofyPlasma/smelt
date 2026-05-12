@@ -1,6 +1,6 @@
 [package]
 name = "smelt"
-version = "0.1.0"
+version = "0.2.0"
 
 [build]
 c_standard = "c17"
@@ -8,7 +8,7 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 link_flags = ["-lm"]
-defines = ["VERSION=\"0.1.0\""]
+defines = ["VERSION=\"0.2.0\""]
 include_dirs = ["src", "vendor"]
 extra_sources = ["vendor/tomlc17.c", "vendor/xxhash.c"]
 
@@ -19,6 +19,6 @@ flags = ["-g", "-O0"]
 flags = ["-O3", "-DNDEBUG"]
 
 [dependencies]
+xxHash = { git = "https://github.com/cyan4973/xxHash", files = ["xxhash.h", "xxhash.c"] }
 tomlc17 = { git = "https://github.com/cktan/tomlc17", files = ["src/tomlc17.c", "src/tomlc17.h"] }
 testlib = { path = "./testlib" }
-xxhash = { git = "https://github.com/cyan4973/xxhash", files = ["xxhash.c", "xxhash.h"] }

@@ -4,6 +4,7 @@
 #include "deps.h"
 #include "init.h"
 #include "manifest.h"
+#include "registry.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -88,14 +89,21 @@ int main(int argc, char **argv) {
       return dep_add_pkgconfig(argv[3]) ? 0 : 1;
     }
 
-    if (argc < 4) {
-      fprintf(stderr, "smept: git dep requires at least one file\n");
-      fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");
-      return 1;
+    if (strncmp(target, "http", 4) == 0) {
+      if (argc < 4) {
+        fprintf(stderr, "smept: git dep requires at least one file\n");
+        fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");
+        return 1;
+      }
+      const char **files = (const char **)&argv[3];
+      int file_count = argc - 3;
+      return dep_add_git(target, files, file_count) ? 0 : 1;
     }
-    const char **files = (const char **)&argv[3];
-    int file_count = argc - 3;
-    return dep_add_git(target, files, file_count) ? 0 : 1;
+
+    Manifest m = {0};
+    if (!manifest_load("smelt.toml", &m))
+      return 1;
+    return registry_add(&m, target) ? 0 : 1;
   }
 
   if (strcmp(argv[1], "update") == 0) {
