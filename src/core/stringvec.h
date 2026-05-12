@@ -1,5 +1,5 @@
-#ifndef SMELT_STRINGVEC_C
-#define SMELT_STRINGVEC_C
+#ifndef SMELT_STRINGVEC_H
+#define SMELT_STRINGVEC_H
 
 #include <stddef.h>
 
