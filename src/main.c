@@ -5,21 +5,56 @@
 #include "pkg/registry.h"
 #include "project/compdb.h"
 #include "project/manifest.h"
+#include "ya_getopt.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
+static const char *help_string = 
+  "usage: smelt <command>\n"
+  "commands: build, run, clean, init, add, update\n";
+
+static const struct option build_longopts[] = {
+    {"profile", required_argument, 0, 'p'},
+    {0, 0, 0, 0},
+};
+
+static const char *build_optstring = "p:";
+
+static const struct option run_longopts[] = {
+    {"profile", required_argument, 0, 'p'},
+    {0, 0, 0, 0},
+};
+
+static const char *run_optstring = "p:";
+
+static const struct option add_longopts[] = {
+    {"pkg-config", required_argument, 0, 0},
+    {0, 0, 0, 0},
+};
+
+static const char *add_optstring = "";
+
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    fprintf(stderr, "usage: smelt <command>\n");
-    fprintf(stderr, "commands: build, run, clean, init, add, update\n");
+  if (argc < 2 || (argc >= 2 && strcmp(argv[1], "--help") == 0)) {
+    fprintf(stderr, "%s", help_string);
     return 1;
   }
 
   if (strcmp(argv[1], "build") == 0) {
     const char *profile = "debug";
-    if (argc >= 3 && strcmp(argv[2], "release") == 0)
-      profile = argv[2];
+
+    int c, optindex;
+    while ((c = getopt_long(argc, argv, build_optstring, build_longopts,
+                            &optindex)) != -1) {
+      if (c == '?') {
+        fprintf(stderr, "smelt: command-line error\n");
+        return 1;
+      }
+    }
+
+    // TODO(maelstrom): Check that the requested profile even exists
+
     Manifest m = {0};
     BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
@@ -34,8 +69,18 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1], "run") == 0) {
     const char *profile = "debug";
-    if (argc >= 3 && strcmp(argv[2], "release") == 0)
-      profile = argv[2];
+
+    int c, optindex;
+    while ((c = getopt_long(argc, argv, run_optstring, run_longopts,
+                            &optindex)) != -1) {
+      if (c == '?') {
+        fprintf(stderr, "smelt: command-line error\n");
+        return 1;
+      }
+    }
+
+    // TODO(maelstrom): Check that the requested profile even exists
+
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
@@ -73,25 +118,42 @@ int main(int argc, char **argv) {
   }
 
   if (strcmp(argv[1], "add") == 0) {
+    const char *target = NULL;
+    const char *pkg_config_target = NULL;
+
+    int c, optindex;
+    while ((c = getopt_long(argc, argv, add_optstring, add_longopts,
+                            &optindex)) != -1) {
+      switch (c) {
+      case 0:
+        pkg_config_target = optarg;
+        break;
+      default: /* ? */
+        fprintf(stderr, "smelt: command-line error\n");
+        return 1;
+      }
+    }
+
+    if (pkg_config_target != NULL) {
+      return dep_add_pkgconfig(pkg_config_target) ? 0 : 1;
+    }
+
     if (argc < 3) {
       fprintf(stderr, "usage: smelt add <git-url> [file1 file2 ...]\n");
       fprintf(stderr, "       smelt add <local/path>\n");
+      fprintf(stderr, "       smelt add --pkg-config <package name>\n");
       return 1;
     }
-
-    const char *target = argv[2];
+    
+    target = argv[2];
 
     if (target[0] == '.' || target[0] == '/') {
       return dep_add_local(target) ? 0 : 1;
     }
 
-    if (argc >= 4 && strcmp(argv[2], "--pkg-config") == 0) {
-      return dep_add_pkgconfig(argv[3]) ? 0 : 1;
-    }
-
     if (strncmp(target, "http", 4) == 0) {
       if (argc < 4) {
-        fprintf(stderr, "smept: git dep requires at least one file\n");
+        fprintf(stderr, "smelt: git dep requires at least one file\n");
         fprintf(stderr, "usage: smelt add <git-url> file1 [file2 ...]\n");
         return 1;
       }
@@ -114,5 +176,6 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr, "smelt: unknown command: %s\n", argv[1]);
+  fprintf(stderr, "%s", help_string);
   return 1;
 }

@@ -12,3 +12,7 @@ commit = "e573d4d2aaeaba0f3e5a0a9a54144a1f2b4b56e7"
 git = "https://github.com/cyan4973/xxHash"
 commit = "e573d4d2aaeaba0f3e5a0a9a54144a1f2b4b56e7"
 
+[ya_getopt]
+git = "https://github.com/kubo/ya_getopt"
+commit = "6ce431085b81d9bb8639ed2f858c4f4fbc3ab988"
+
