@@ -243,7 +243,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     process_argv_push(&proc, "-o");
     process_argv_push(&proc, obj);
 
-    // TODO(FloofyPlasma): Add process printing
+    process_print(&proc);
 
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: compile failed: %s\n", src);
@@ -298,7 +298,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     process_argv_push(&proc, "-o");
     process_argv_push(&proc, output);
 
-    // TODO(FloofyPlasma): print process
+    process_print(&proc);
 
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: link failed\n");

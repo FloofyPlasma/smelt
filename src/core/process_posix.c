@@ -50,6 +50,19 @@ int process_argv_extend(Process *p, const StringVec *v) {
   return 1;
 }
 
+void process_print(const Process *p) {
+  if (!p)
+    return;
+
+  printf("smelt:");
+
+  for (size_t i = 0; i < stringvec_len(&p->argv); i++) {
+    printf(" %s", stringvec_get(&p->argv, i));
+  }
+
+  printf("\n");
+}
+
 int process_run(Process *p) {
   char **argv = process_make_argv(p);
   if (!argv)
