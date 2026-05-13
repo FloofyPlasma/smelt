@@ -14,27 +14,6 @@ static const char *help_string =
     "usage: smelt <command>\n"
     "commands: build, run, clean, init, add, update\n";
 
-static const struct option build_longopts[] = {
-    {"profile", required_argument, 0, 'p'},
-    {0, 0, 0, 0},
-};
-
-static const char *build_optstring = "p:";
-
-static const struct option run_longopts[] = {
-    {"profile", required_argument, 0, 'p'},
-    {0, 0, 0, 0},
-};
-
-static const char *run_optstring = "p:";
-
-static const struct option add_longopts[] = {
-    {"pkg-config", required_argument, 0, 0},
-    {0, 0, 0, 0},
-};
-
-static const char *add_optstring = "";
-
 int main(int argc, char **argv) {
   if (argc < 2 || (argc >= 2 && strcmp(argv[1], "--help") == 0)) {
     fprintf(stderr, "%s", help_string);
@@ -44,10 +23,19 @@ int main(int argc, char **argv) {
   if (strcmp(argv[1], "build") == 0) {
     const char *profile = "debug";
 
+    static const struct option build_longopts[] = {
+        {"profile", required_argument, 0, 'p'},
+        {0, 0, 0, 0},
+    };
+
     int c, optindex;
-    while ((c = getopt_long(argc, argv, build_optstring, build_longopts,
+    while ((c = getopt_long(argc, argv, "p:", build_longopts,
                             &optindex)) != -1) {
-      if (c == '?') {
+      switch (c) {
+      case 'p':
+        profile = optarg;
+        break;
+      default: /* ? */
         fprintf(stderr, "smelt: command-line error\n");
         return 1;
       }
@@ -76,10 +64,19 @@ int main(int argc, char **argv) {
   if (strcmp(argv[1], "run") == 0) {
     const char *profile = "debug";
 
+    static const struct option run_longopts[] = {
+        {"profile", required_argument, 0, 'p'},
+        {0, 0, 0, 0},
+    };
+
     int c, optindex;
-    while ((c = getopt_long(argc, argv, run_optstring, run_longopts,
+    while ((c = getopt_long(argc, argv, "p:", run_longopts,
                             &optindex)) != -1) {
-      if (c == '?') {
+      switch (c) {
+      case 'p':
+        profile = optarg;
+        break;
+      default: /* ? */
         fprintf(stderr, "smelt: command-line error\n");
         return 1;
       }
@@ -135,12 +132,21 @@ int main(int argc, char **argv) {
     const char *target = NULL;
     const char *pkg_config_target = NULL;
 
+    static const struct option add_longopts[] = {
+        {"pkg-config", required_argument, 0, 0},
+        {0, 0, 0, 0},
+    };
+
     int c, optindex;
-    while ((c = getopt_long(argc, argv, add_optstring, add_longopts,
+    while ((c = getopt_long(argc, argv, "", add_longopts,
                             &optindex)) != -1) {
       switch (c) {
       case 0:
-        pkg_config_target = optarg;
+        switch (optindex) {
+        case 0:
+          pkg_config_target = optarg;
+          break;
+        }
         break;
       default: /* ? */
         fprintf(stderr, "smelt: command-line error\n");
