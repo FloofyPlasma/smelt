@@ -1,6 +1,5 @@
 #include "project/manifest.h"
 #include "tomlc17.h"
-#include <bits/types/locale_t.h>
 #include <stdio.h>
 #include <string.h>
 
