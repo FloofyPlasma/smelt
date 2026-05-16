@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "pkg/deps.h"
+#include "core/fs.h"
 #include "core/process.h"
 #include "project/lock.h"
 #include "project/manifest.h"
@@ -7,26 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-
-static int process_capture_lines(Process *proc,
-                                 void (*fn)(char *line, void *ud), void *ud) {
-  char output[65536] = {0};
-
-  if (!process_capture(proc, output, sizeof(output)))
-    return 0;
-
-  char *saveptr = NULL;
-
-  char *line = strtok_r(output, "\n", &saveptr);
-
-  while (line) {
-    fn(line, ud);
-
-    line = strtok_r(NULL, "\n", &saveptr);
-  }
-
-  return 1;
-}
 
 static void parse_pkgconfig_cflags(char *line, void *ud) {
   Manifest *m = ud;

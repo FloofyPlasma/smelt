@@ -18,5 +18,7 @@ void process_print(const Process *p);
 
 int process_run(Process *p);
 int process_capture(Process *p, char *dst, size_t dstsz);
+int process_capture_lines(Process *proc, void (*fn)(char *line, void *ud),
+                          void *ud);
 
 #endif

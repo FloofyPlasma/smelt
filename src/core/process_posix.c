@@ -165,4 +165,24 @@ int process_capture(Process *p, char *dst, size_t dstsz) {
   return process_wait(pid);
 }
 
+int process_capture_lines(Process *proc, void (*fn)(char *line, void *ud),
+                          void *ud) {
+  char output[65536] = {0};
+
+  if (!process_capture(proc, output, sizeof(output)))
+    return 0;
+
+  char *saveptr = NULL;
+
+  char *line = strtok_r(output, "\n", &saveptr);
+
+  while (line) {
+    fn(line, ud);
+
+    line = strtok_r(NULL, "\n", &saveptr);
+  }
+
+  return 1;
+}
+
 #endif
