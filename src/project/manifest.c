@@ -30,7 +30,6 @@ static void parse_str_array(toml_datum_t root, const char *key,
   }
 }
 
-// TODO(FloofyPlasma): theres a lot of duplicated code here. clean up.
 int manifest_load(const char *path, Manifest *out) {
   *out = (Manifest){0};
 
@@ -98,7 +97,7 @@ int manifest_load(const char *path, Manifest *out) {
         continue;
 
       Dep *dep = &out->deps[out->dep_count++];
-      snprintf(dep->name, sizeof(dep->name), "%s", depname);
+      scopy(dep->name, sizeof(dep->name), depname);
 
       toml_datum_t entry = toml_get(deps_table, depname);
       if (entry.type != TOML_TABLE)
@@ -106,11 +105,11 @@ int manifest_load(const char *path, Manifest *out) {
 
       toml_datum_t git = toml_get(entry, "git");
       if (git.type == TOML_STRING)
-        snprintf(dep->git, sizeof(dep->git), "%s", git.u.s);
+        scopy(dep->git, sizeof(dep->git), git.u.s);
 
       toml_datum_t path = toml_get(entry, "path");
       if (path.type == TOML_STRING) {
-        snprintf(dep->path, sizeof(dep->path), "%s", path.u.s);
+        scopy(dep->path, sizeof(dep->path), path.u.s);
         dep->is_local = 1;
       }
 
@@ -125,7 +124,7 @@ int manifest_load(const char *path, Manifest *out) {
 
       toml_datum_t pkgcfg = toml_get(entry, "pkg-config");
       if (pkgcfg.type == TOML_STRING)
-        snprintf(dep->pkg_config, sizeof(dep->pkg_config), "%s", pkgcfg.u.s);
+        scopy(dep->pkg_config, sizeof(dep->pkg_config), pkgcfg.u.s);
     }
   }
 
