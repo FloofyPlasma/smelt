@@ -2,6 +2,7 @@
 #include "cmd/clean.h"
 #include "cmd/init.h"
 #include "pkg/deps.h"
+#include "pkg/git_deps.h"
 #include "pkg/registry.h"
 #include "project/compdb.h"
 #include "project/manifest.h"
@@ -20,6 +21,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  git_deps_init();
+
   if (strcmp(argv[1], "build") == 0) {
     const char *profile = "debug";
 
@@ -29,8 +32,8 @@ int main(int argc, char **argv) {
     };
 
     int c, optindex;
-    while ((c = getopt_long(argc, argv, "p:", build_longopts,
-                            &optindex)) != -1) {
+    while ((c = getopt_long(argc, argv, "p:", build_longopts, &optindex)) !=
+           -1) {
       switch (c) {
       case 'p':
         profile = optarg;
@@ -70,8 +73,7 @@ int main(int argc, char **argv) {
     };
 
     int c, optindex;
-    while ((c = getopt_long(argc, argv, "p:", run_longopts,
-                            &optindex)) != -1) {
+    while ((c = getopt_long(argc, argv, "p:", run_longopts, &optindex)) != -1) {
       switch (c) {
       case 'p':
         profile = optarg;
@@ -138,8 +140,7 @@ int main(int argc, char **argv) {
     };
 
     int c, optindex;
-    while ((c = getopt_long(argc, argv, "", add_longopts,
-                            &optindex)) != -1) {
+    while ((c = getopt_long(argc, argv, "", add_longopts, &optindex)) != -1) {
       switch (c) {
       case 0:
         switch (optindex) {

@@ -2,7 +2,7 @@
 
 [tomlc17]
 git = "https://github.com/cktan/tomlc17"
-commit = "218c10f162ba7b89a6eca673f8e42150226d2dc2"
+commit = "24d1e0a959de819f3f543a710f9ca118eef3e9cd"
 
 [xxhash]
 git = "https://github.com/cyan4973/xxhash"

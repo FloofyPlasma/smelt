@@ -2,6 +2,7 @@
 #include "pkg/deps.h"
 #include "core/fs.h"
 #include "core/process.h"
+#include "pkg/git_deps.h"
 #include "project/lock.h"
 #include "project/manifest.h"
 #include <stdio.h>
@@ -154,20 +155,11 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
 
   if (!dir_exists(cache_out)) {
     ensure_dirs(cache_out);
-    Process clone = {0};
-
-    process_argv_push(&clone, "git");
-    process_argv_push(&clone, "clone");
-    process_argv_push(&clone, "--depth=1");
-    process_argv_push(&clone, url);
-    process_argv_push(&clone, cache_out);
-    process_print(&clone);
-    if (!process_run(&clone)) {
+    git_repository *repo = NULL;
+    if (!clone_repo(repo, url, cache_out)) {
       fprintf(stderr, "smelt: git clone failed\n");
-      process_free(&clone);
       return 0;
     }
-    process_free(&clone);
   } else {
     printf("smelt: using cached %s\n", cache_out);
   }
@@ -176,7 +168,7 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
     const char *pinned = lockfile_get_commit(lf, name);
     if (pinned) {
       Process fetch = {0};
-
+      // TODO(FloofyPlasma): Migrate to libgit2
       process_argv_push(&fetch, "git");
       process_argv_push(&fetch, "-C");
       process_argv_push(&fetch, cache_out);
@@ -188,7 +180,7 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
       process_free(&fetch);
 
       Process checkout = {0};
-
+      // TODO(FloofyPlasma): Migrate to libgit2
       process_argv_push(&checkout, "git");
       process_argv_push(&checkout, "-C");
       process_argv_push(&checkout, cache_out);
