@@ -1,4 +1,5 @@
 #include "pkg/registry.h"
+#include "core/fs.h"
 #include "core/process.h"
 #include "pkg/deps.h"
 #include "tomlc17.h"
@@ -6,20 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-
-// FIXME: duplicated across files
-static void ensure_dirs(const char *path) {
-  char tmp[MAX_PATH];
-  snprintf(tmp, sizeof(tmp), "%s", path);
-  for (char *p = tmp + 1; *p; p++) {
-    if (*p == '/') {
-      *p = '\0';
-      mkdir(tmp, 0755);
-      *p = '/';
-    }
-  }
-  mkdir(tmp, 0755);
-}
 
 static int file_exists(const char *path) {
   struct stat st;

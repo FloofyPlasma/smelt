@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
 #include "cmd/ccflags.h"
+#include "core/fs.h"
+#include "core/hash.h"
 #include "core/process.h"
 #include "project/cache.h"
 #include "project/manifest.h"
@@ -15,63 +17,6 @@
 
 #define MAX_CMD 16384
 
-// FIXME: duplicated across source files
-static int ends_with_c(const char *name) {
-  size_t len = strlen(name);
-  return len > 2 && name[len - 2] == '.' && name[len - 1] == 'c';
-}
-
-static int scan_dir(BuildCtx *ctx, const char *dir);
-// TODO(FloofyPlasma): make this platform independent
-static int scan_dir(BuildCtx *ctx, const char *dir) {
-  DIR *d = opendir(dir);
-  if (!d) {
-    fprintf(stderr, "smelt: cannot open dir: %s\n", dir);
-    return 0;
-  }
-
-  struct dirent *entry;
-  while ((entry = readdir(d)) != NULL) {
-    if (entry->d_name[0] == '.')
-      continue;
-
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
-
-    struct stat st;
-    if (stat(path, &st) != 0)
-      continue;
-
-    if (S_ISDIR(st.st_mode)) {
-      scan_dir(ctx, path);
-    } else if (S_ISREG(st.st_mode) && ends_with_c(entry->d_name)) {
-      if (!stringvec_push(&ctx->sources, path)) {
-        fprintf(stderr, "smelt: out of memory\n");
-        closedir(d);
-        return 0;
-      }
-    }
-  }
-
-  closedir(d);
-  return 1;
-}
-
-static void ensure_dir(const char *path) { mkdir(path, 0755); }
-
-// TODO(FloofyPlasma): move this elsewhere
-static void hash_update_vec(XXH3_state_t *state, const StringVec *v) {
-  for (size_t i = 0; i < stringvec_len(v); i++) {
-    const char *s = stringvec_get(v, i);
-
-    XXH3_64bits_update(state, s, strlen(s));
-
-    char nul = '\0';
-    XXH3_64bits_update(state, &nul, 1);
-  }
-}
-
-// TODO(FloofyPlasma): move this elsewhere
 static int hash_source_and_deps(const char *src, const char *obj_dir,
                                 const StringVec *flags, char *out,
                                 size_t outsz) {
@@ -161,7 +106,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     return 0;
   }
 
-  ensure_dir(m->out_dir);
+  ensure_dirs(m->out_dir);
 
   StringVec flags = {0};
 
