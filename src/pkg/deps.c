@@ -70,20 +70,6 @@ static int file_exists(const char *path) {
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-// TODO(floofyplasma): make this platform independent, add error handling
-static void ensure_dirs(const char *path) {
-  char tmp[MAX_PATH];
-  snprintf(tmp, sizeof(tmp), "%s", path);
-  for (char *p = tmp + 1; *p; p++) {
-    if (*p == '/') {
-      *p = '\0';
-      mkdir(tmp, 0755);
-      *p = '/';
-    }
-  }
-  mkdir(tmp, 0755);
-}
-
 // TODO(floofyplasma): add error handling
 static int copy_file(const char *src, const char *dst) {
   FILE *in = fopen(src, "rbe");
@@ -114,12 +100,6 @@ static int copy_file(const char *src, const char *dst) {
 static const char *base_name(const char *path) {
   const char *s = strrchr(path, '/');
   return s ? s + 1 : path;
-}
-
-// FIXME: duplicated across files
-static int ends_with_c(const char *name) {
-  size_t len = strlen(name);
-  return len > 2 && name[len - 2] == '.' && name[len - 1] == 'c';
 }
 
 // FIXME: this is very fucking disgusting, should probably be rewritten entirely
