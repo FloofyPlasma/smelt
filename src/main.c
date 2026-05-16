@@ -21,8 +21,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  git_deps_init();
-
   if (strcmp(argv[1], "build") == 0) {
     const char *profile = "debug";
 
@@ -50,17 +48,21 @@ int main(int argc, char **argv) {
     BuildCtx ctx = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
+    git_deps_init();
     if (!deps_ensure(&m)) {
       manifest_free(&m);
+      git_deps_free();
       return 1;
     }
     if (!build_run(&m, &ctx, profile)) {
       manifest_free(&m);
+      git_deps_free();
       return 1;
     }
     compdb_write(&m, &ctx);
     buildctx_free(&ctx);
     manifest_free(&m);
+    git_deps_free();
     return 0;
   }
 
@@ -89,12 +91,15 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
+    git_deps_init();
     if (!deps_ensure(&m)) {
       manifest_free(&m);
+      git_deps_free();
       return 1;
     }
     if (!build_run(&m, NULL, profile)) {
       manifest_free(&m);
+      git_deps_free();
       return 1;
     }
 
@@ -111,6 +116,7 @@ int main(int argc, char **argv) {
     child_args[child_argc] = NULL;
 
     manifest_free(&m);
+    git_deps_free();
     execv(output, child_args);
     perror("smelt: execv failed");
     return 1;
@@ -196,9 +202,11 @@ int main(int argc, char **argv) {
     Manifest m = {0};
     if (!manifest_load("smelt.toml", &m))
       return 1;
+    git_deps_init();
     int ok = deps_update(&m);
 
     manifest_free(&m);
+    git_deps_free();
     return ok ? 0 : 1;
   }
 

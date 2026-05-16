@@ -2,11 +2,18 @@
 #include <git2.h>
 #include <stdio.h>
 
+static int INITIALIZED = 0;
+
 void git_deps_init(void) {
-  static int INITIALIZED = 0;
   if (!INITIALIZED) {
     INITIALIZED = 1;
     git_libgit2_init();
+  }
+}
+
+void git_deps_free(void) {
+  if (INITIALIZED) {
+    git_libgit2_shutdown();
   }
 }
 
