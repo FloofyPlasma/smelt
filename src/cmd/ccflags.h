@@ -10,6 +10,7 @@
 int ccflags_write_command_line(const Manifest *manifest, const char *profile,
                                char *cmdline, int cmdlinec, int no_defines);
 
+// TODO(FloofyPlasma): Make flags work across diffreent compilers
 int ccflags_build_vec(const Manifest *manifest, const char *profile,
                       StringVec *out, int no_defines);
 
