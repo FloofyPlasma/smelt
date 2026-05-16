@@ -3,7 +3,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-// TODO(FloofyPlasma): update template with some of the new properties
 int init_run(void) {
   FILE *check = fopen("smelt.toml", "re");
   if (check) {
@@ -50,7 +49,15 @@ int init_run(void) {
           "c_standard = \"%s\"\n"
           "warnings = \"all\"\n"
           "src_dir = \"src\"\n"
-          "out_dir = \"build\"\n",
+          "out_dir = \"build\"\n"
+          "\n"
+          "[profile.debug]\n"
+          "flags = []\n"
+          "\n"
+          "[profile.release]\n"
+          "flags = []\n"
+          "\n"
+          "[dependencies]\n",
           name, version, standard);
 
   fclose(fp);
