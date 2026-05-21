@@ -88,7 +88,7 @@ int registry_fetch_recipe(const Manifest *m, const char *name) {
   return 0;
 }
 
-int recipe_load(const char *path, Recipe *out) {
+int recipe_load2(const char *path, Recipe *out) {
   *out = (Recipe){0};
 
   toml_result_t result = toml_parse_file_ex(path);
@@ -153,24 +153,24 @@ int registry_add(Manifest *m, const char *name) {
   registry_recipe_path(recipe_path, sizeof(recipe_path), name);
 
   Recipe r = {0};
-  if (!recipe_load(recipe_path, &r))
+  if (!recipe_load2(recipe_path, &r))
     return 0;
 
   if (r.build_system[0] && strcmp(r.build_system, "none") != 0) {
     fprintf(stderr, "smelt: build system '%s' not yet supported\n",
             r.build_system);
-    recipe_free(&r);
+    recipe_free2(&r);
     return 0;
   }
 
   printf("smelt: installing %s @ %s\n", r.name, r.version);
   int ok = dep_add_git(r.git, &r.copy_files);
 
-  recipe_free(&r);
+  recipe_free2(&r);
   return ok;
 }
 
-void recipe_free(Recipe *r) {
+void recipe_free2(Recipe *r) {
   stringvec_free(&r->build_args);
   stringvec_free(&r->copy_files);
 }

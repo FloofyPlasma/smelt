@@ -17,10 +17,10 @@ typedef struct {
   StringVec copy_files;
 } Recipe;
 
-void recipe_free(Recipe *r);
+void recipe_free2(Recipe *r);
 int registry_fetch_recipe(const Manifest *m, const char *name);
 void registry_recipe_path(char *dst, size_t dstsz, const char *name);
-int recipe_load(const char *path, Recipe *out);
+int recipe_load2(const char *path, Recipe *out);
 int registry_add(Manifest *m, const char *name);
 
 #endif
