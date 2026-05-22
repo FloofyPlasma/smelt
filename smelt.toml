@@ -10,7 +10,7 @@ out_dir = "build"
 link_flags = ["-lm"]
 defines = ["VERSION=\"0.3.0\""]
 include_dirs = ["src", "vendor"]
-extra_sources = []
+extra_sources = ["vendor/xxhash.c", "vendor/tomlc17.c", "vendor/ya_getopt.c"]
 
 [profile.debug]
 flags = ["-g", "-O0"]
@@ -19,8 +19,7 @@ flags = ["-g", "-O0"]
 flags = ["-O3", "-DNDEBUG"]
 
 [dependencies]
-libgit2 = { pkg-config = "libgit2" }
-ya_getopt = { git = "https://github.com/kubo/ya_getopt", files = ["ya_getopt.c", "ya_getopt.h"] }
-xxHash = { git = "https://github.com/cyan4973/xxHash", files = ["xxhash.h", "xxhash.c"] }
-tomlc17 = { git = "https://github.com/cktan/tomlc17", files = ["src/tomlc17.c", "src/tomlc17.h"] }
 testlib = { path = "./testlib" }
+
+[system-dependencies]
+libgit2 = { pkg-config = "libgit2" }

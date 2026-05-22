@@ -2,28 +2,44 @@
 #define SMELT_MANIFEST_H
 
 #include "core/stringvec.h"
+#include "core/vec.h"
 
-// TODO(FloofyPlasma): make MAX_DEPS, MAX_DEP_FILES, MAX_DEP_SOURCES,
-//                     MAX_REGISTRIES obsolete. the other ones are sensible
-//                     defaults, maybe move to a constants header instead?
 #define MAX_NAME 128
 #define MAX_STR 256
 #define MAX_PATH 1024
-#define MAX_DEPS 64
-#define MAX_DEP_FILES 16
-#define MAX_DEP_SOURCES 256
 #define MAX_REGISTRIES 8
 
+typedef enum {
+  DEP_GIT,
+  DEP_LOCAL,
+  DEP_PKG_CONFIG,
+  DEP_SYSTEM,
+} DepKind;
+
 typedef struct {
+  DepKind kind;
   char name[MAX_NAME];
-  char git[MAX_STR];
-  char path[MAX_PATH];
-  char pkg_config[MAX_NAME];
-  StringVec files;
-  int file_count;
-  int is_local;
-  int is_smelt_aware;
+  char version[MAX_STR];
+
+  union {
+    struct {
+      char git[MAX_STR];
+      char tag[MAX_STR];
+      char commit[64];
+    } git;
+    struct {
+      char path[MAX_PATH];
+    } local;
+    struct {
+      char pkg_config[MAX_NAME];
+      char link_flag[MAX_STR];
+    } pkg;
+  };
+
+  StringVec features;
 } Dep;
+
+typedef VEC(Dep) DepVec;
 
 typedef struct {
   StringVec flags;
@@ -36,16 +52,18 @@ typedef struct {
   char warnings[32];
   char src_dir[MAX_PATH];
   char out_dir[MAX_PATH];
-  Dep deps[MAX_DEPS];
-  int dep_count;
+
+  DepVec deps;
+
   StringVec extra_sources;
   StringVec include_dirs;
-  Profile debug;
-  Profile release;
   StringVec link_flags;
   StringVec defines;
   StringVec dep_sources;
   StringVec registries;
+
+  Profile debug;
+  Profile release;
 } Manifest;
 
 void manifest_free(Manifest *m);
