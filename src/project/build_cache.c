@@ -1,4 +1,4 @@
-#include "project/cache.h"
+#include "project/build_cache.h"
 #include "xxhash.h"
 #include <stdio.h>
 #include <stdlib.h>

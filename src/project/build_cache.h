@@ -1,5 +1,5 @@
-#ifndef SMELT_CACHE_H
-#define SMELT_CACHE_H
+#ifndef SMELT_BUILD_CACHE_H
+#define SMELT_BUILD_CACHE_H
 
 #include "project/manifest.h"
 #include <stddef.h>

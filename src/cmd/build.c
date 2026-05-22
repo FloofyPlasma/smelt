@@ -4,7 +4,7 @@
 #include "core/fs.h"
 #include "core/hash.h"
 #include "core/process.h"
-#include "project/cache.h"
+#include "project/build_cache.h"
 #include "project/manifest.h"
 #include "xxhash.h"
 #include <dirent.h>
