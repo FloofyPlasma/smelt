@@ -1,11 +1,12 @@
-#include "core/process.h"
 #define _POSIX_C_SOURCE 200809L
 
+#include "pkg/resolve.h"
+#include "core/fs.h"
+#include "core/process.h"
 #include "core/semver.h"
 #include "core/stringvec.h"
 #include "core/vec.h"
 #include "pkg/recipe.h"
-#include "pkg/resolve.h"
 #include "project/manifest.h"
 
 #include <stdio.h>
@@ -53,15 +54,17 @@ static int file_exists(const char *path) {
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-static int fetch_recipe(const char *name, const char *version,
-                        const ResolveCtx *ctx, char *recipe_path_out,
-                        size_t path_sz) {
+int fetch_recipe(const char *name, const char *version, const ResolveCtx *ctx,
+                 char *recipe_path_out, size_t path_sz) {
   snprintf(recipe_path_out, path_sz, "%s/%s@%s.toml", ctx->cache_dir, name,
            version);
 
   if (file_exists(recipe_path_out)) {
     return 1;
   }
+
+  ensure_dirs(ctx->cache_dir);
+  fprintf(stderr, "cache_dir=%s\n", ctx->cache_dir);
 
   if (!ctx->registry_url || ctx->registry_url[0] == '\0') {
     fprintf(stderr, "smelt: no registry configured\n");
@@ -106,16 +109,18 @@ static int fetch_recipe(const char *name, const char *version,
   Process curl = {0};
 
   process_argv_push(&curl, "curl");
-  process_argv_push(&curl, "-sf");
+  process_argv_push(&curl, "-s");
   process_argv_push(&curl, "--max-time");
   process_argv_push(&curl, "10");
   process_argv_push(&curl, "-o");
   process_argv_push(&curl, recipe_path_out);
   process_argv_push(&curl, url);
 
+  process_print(&curl);
+
   printf("smelt: fetching recipe %s@%s\n", name, version);
 
-  if (process_run(&curl) != 0 || !file_exists(recipe_path_out)) {
+  if (!process_run(&curl) || !file_exists(recipe_path_out)) {
     remove(recipe_path_out);
     fprintf(stderr,
             "smelt: no recipe found for %s@%s\n\n"
@@ -264,6 +269,16 @@ static int resolve_one(const char *name, const char *version,
   if (!visit_push(stack, out->items[out->len - 1].name)) {
     recipe_free(&recipe);
     return 0;
+  }
+
+  for (size_t i = 0; i < stringvec_len(&recipe.dep_names); i++) {
+    const char *dep_name = stringvec_get(&recipe.dep_names, i);
+    const char *dep_ver = stringvec_get(&recipe.dep_versions, i);
+    if (!resolve_one(dep_name, dep_ver, NULL, 0, name, ctx, out, stack)) {
+      visit_pop(stack);
+      recipe_free(&recipe);
+      return 0;
+    }
   }
 
   if (!resolve_feature_requires(&recipe, features, name, ctx, out, stack)) {

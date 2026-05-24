@@ -26,5 +26,7 @@ typedef struct {
 int resolve_deps(const Manifest *m, const ResolveCtx *ctx,
                  ResolvedPackageVec *out);
 void resolved_package_vec_free(ResolvedPackageVec *v);
+int fetch_recipe(const char *name, const char *version, const ResolveCtx *ctx,
+                 char *recipe_path_out, size_t path_sz);
 
 #endif

@@ -1,0 +1,10 @@
+# smelt.lock -- do not edit manually --
+
+[[package]]
+name     = "xxhash"
+version  = "0.8.3"
+commit   = ""
+git      = "https://github.com/Cyan4973/xxHash"
+tag      = "v0.8.3"
+direct   = true
+

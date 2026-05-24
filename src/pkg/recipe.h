@@ -32,6 +32,8 @@ typedef struct {
   RecipeFiles files;
   RecipeFeatureVec features;
   StringVec link_flags;
+  StringVec dep_names;
+  StringVec dep_versions;
 } Recipe;
 
 int recipe_load(const char *path, Recipe *out);

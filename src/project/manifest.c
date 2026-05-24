@@ -214,3 +214,125 @@ void manifest_free(Manifest *m) {
   stringvec_free(&m->debug.flags);
   stringvec_free(&m->release.flags);
 }
+
+static void write_str_array(FILE *fp, const char *key, const StringVec *v) {
+  if (stringvec_len(v) == 0) {
+    fprintf(fp, "%s  = []\n", key);
+    return;
+  }
+  fprintf(fp, "%s = [", key);
+  for (size_t i = 0; i < stringvec_len(v); i++) {
+    fprintf(fp, "\"%s\"", stringvec_get(v, i));
+    if (i < stringvec_len(v) - 1)
+      fprintf(fp, ", ");
+  }
+  fprintf(fp, "]\n");
+}
+
+int manifest_save(const char *path, const Manifest *m) {
+  FILE *fp = fopen(path, "we");
+  if (!fp) {
+    perror("smelt: cannot write manifest");
+    return 0;
+  }
+
+  fprintf(fp, "[package]\n");
+  fprintf(fp, "name = \"%s\"\n", m->name);
+  fprintf(fp, "version = \"%s\"\n", m->version);
+  fprintf(fp, "\n");
+
+  fprintf(fp, "[build]\n");
+  if (m->c_standard[0])
+    fprintf(fp, "c_standard = \"%s\"\n", m->c_standard);
+  if (m->warnings[0])
+    fprintf(fp, "warnings = \"%s\"\n", m->warnings);
+  if (m->src_dir[0])
+    fprintf(fp, "src_dir = \"%s\"\n", m->src_dir);
+  if (m->out_dir[0])
+    fprintf(fp, "out_dir = \"%s\"\n", m->out_dir);
+  write_str_array(fp, "link_flags", &m->link_flags);
+  write_str_array(fp, "defines", &m->defines);
+  write_str_array(fp, "include_dirs", &m->include_dirs);
+  write_str_array(fp, "extra_sources", &m->extra_sources);
+  fprintf(fp, "\n");
+
+  fprintf(fp, "[profile.debug]\n");
+  write_str_array(fp, "flags", &m->debug.flags);
+  fprintf(fp, "\n");
+
+  fprintf(fp, "[profile.release]\n");
+  write_str_array(fp, "flags", &m->release.flags);
+  fprintf(fp, "\n");
+
+  int has_deps = 0;
+  for (size_t i = 0; i < vec_len(&m->deps); i++) {
+    const Dep *dep = &m->deps.items[i];
+    if (dep->kind == DEP_GIT || dep->kind == DEP_LOCAL) {
+      has_deps = 1;
+      break;
+    }
+  }
+  if (has_deps) {
+    fprintf(fp, "[dependencies]\n");
+    for (size_t i = 0; i < vec_len(&m->deps); i++) {
+      const Dep *dep = &m->deps.items[i];
+      if (dep->kind == DEP_GIT) {
+        if (stringvec_len(&dep->features) == 0) {
+          fprintf(fp, "%s = \"%s\"\n", dep->name, dep->version);
+        } else {
+          fprintf(fp, "%s = { version = \"%s\", features = [", dep->name,
+                  dep->version);
+          for (size_t j = 0; j < stringvec_len(&dep->features); j++) {
+            fprintf(fp, "\"%s\"", stringvec_get(&dep->features, j));
+            if (j < stringvec_len(&dep->features) - 1)
+              fprintf(fp, ", ");
+          }
+          fprintf(fp, "] }\n");
+        }
+      } else if (dep->kind == DEP_LOCAL) {
+        fprintf(fp, "%s = { path = \"%s\" }\n", dep->name, dep->local.path);
+      }
+    }
+    fprintf(fp, "\n");
+  }
+
+  int has_sys = 0;
+  for (size_t i = 0; i < vec_len(&m->deps); i++) {
+    const Dep *dep = &m->deps.items[i];
+    if (dep->kind == DEP_PKG_CONFIG || dep->kind == DEP_SYSTEM) {
+      has_sys = 1;
+      break;
+    }
+  }
+  if (has_sys) {
+    fprintf(fp, "[system-dependencies]\n");
+    for (size_t i = 0; i < vec_len(&m->deps); i++) {
+      const Dep *dep = &m->deps.items[i];
+      if (dep->kind == DEP_PKG_CONFIG)
+        fprintf(fp, "%s = { pkg-config = \"%s\" }\n", dep->name,
+                dep->pkg.pkg_config);
+      else if (dep->kind == DEP_SYSTEM)
+        fprintf(fp, "%s = { link = \"%s\" }\n", dep->name, dep->pkg.link_flag);
+    }
+    fprintf(fp, "\n");
+  }
+
+  fclose(fp);
+  return 1;
+}
+
+int manifest_add_dep(Manifest *m, const char *name, const char *version) {
+  for (size_t i = 0; i < vec_len(&m->deps); i++)
+    if (strcmp(m->deps.items[i].name, name) == 0)
+      return 0;
+
+  Dep dep = {0};
+  dep.kind = DEP_GIT;
+  snprintf(dep.name, sizeof(dep.name), "%s", name);
+  snprintf(dep.version, sizeof(dep.version), "%s", version);
+
+  if (!vec_push(&m->deps, dep))
+    return 0;
+
+  return 1;
+}

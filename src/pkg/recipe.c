@@ -74,7 +74,7 @@ static int parse_features(toml_datum_t root, RecipeFeatureVec *out) {
     if (!push_str_array(&feat.files, toml_get(fentry, "files")))
       return 0;
 
-    if (!push_str_array(&feat.requires, toml_get(fentry, "retquires")))
+    if (!push_str_array(&feat.requires, toml_get(fentry, "requires")))
       return 0;
 
     if (!vec_push(out, feat)) {
@@ -154,6 +154,43 @@ int recipe_load(const char *path, Recipe *out) {
     return 0;
   }
 
+  toml_datum_t deps_tbl = toml_seek(t, "dependencies");
+  if (deps_tbl.type == TOML_TABLE) {
+    for (int i = 0; i < deps_tbl.u.tab.size; i++) {
+      const char *depname = deps_tbl.u.tab.key[i];
+      if (!depname)
+        continue;
+      toml_datum_t entry = toml_get(deps_tbl, depname);
+      const char *ver_str = NULL;
+      char ver_buf[MAX_STR];
+
+      if (entry.type == TOML_STRING) {
+        ver_str = entry.u.s;
+      } else if (entry.type == TOML_TABLE) {
+        toml_datum_t v = toml_get(entry, "version");
+        if (v.type == TOML_STRING) {
+          snprintf(ver_buf, sizeof(ver_buf), "%s", v.u.s);
+          ver_str = ver_buf;
+        }
+      }
+
+      if (!ver_str)
+        continue;
+
+      if (!stringvec_push(&out->dep_names, depname)) {
+        toml_free(result);
+        recipe_free(out);
+        return 0;
+      }
+
+      if (!stringvec_push(&out->dep_versions, ver_str)) {
+        toml_free(result);
+        recipe_free(out);
+        return 0;
+      }
+    }
+  }
+
   toml_free(result);
   return 1;
 }
@@ -175,6 +212,8 @@ void recipe_free(Recipe *r) {
   }
 
   vec_free(&r->features);
+  stringvec_free(&r->dep_names);
+  stringvec_free(&r->dep_versions);
 }
 
 void recipe_cache_path(char *dst, size_t dstsz, const char *name,

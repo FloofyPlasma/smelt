@@ -8,7 +8,7 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 link_flags = ["-lm"]
-defines = ["VERSION=\"0.3.0\""]
+defines  = []
 include_dirs = ["src", "vendor"]
 extra_sources = ["vendor/xxhash.c", "vendor/tomlc17.c", "vendor/ya_getopt.c"]
 
@@ -20,6 +20,8 @@ flags = ["-O3", "-DNDEBUG"]
 
 [dependencies]
 testlib = { path = "./testlib" }
+xxhash = "0.8.3"
 
 [system-dependencies]
 libgit2 = { pkg-config = "libgit2" }
+

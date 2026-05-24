@@ -69,4 +69,8 @@ typedef struct {
 void manifest_free(Manifest *m);
 int manifest_load(const char *path, Manifest *out);
 
+int manifest_save(const char *path, const Manifest *m);
+
+int manifest_add_dep(Manifest *m, const char *name, const char *version);
+
 #endif

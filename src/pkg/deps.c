@@ -146,9 +146,6 @@ static int fetch_git(const char *url, char *cache_out, size_t cache_sz,
     commit[strcspn(commit, "\n")] = '\0';
   process_free(&rev_parse);
 
-  if (lf && commit[0])
-    lockfile_set(lf, name, url, commit);
-
   return 1;
 }
 
@@ -173,7 +170,6 @@ int dep_add_git(const char *url, const StringVec *files) {
     printf("smelt: copied %s -> %s\n", f, dst);
   }
 
-  lockfile_save(&lf);
   return 1;
 }
 
@@ -386,7 +382,6 @@ int deps_update(Manifest *m) {
       process_free(&rev);
 
       if (commit[0]) {
-        lockfile_set(&lf, name, dep->git.git, commit);
         printf("smelt: updated %s @ %.8s\n", name, commit);
       }
       break;
@@ -394,7 +389,6 @@ int deps_update(Manifest *m) {
     }
   }
 
-  lockfile_save(&lf);
   printf("smelt: lockfile updated\n");
   return 1;
 }
@@ -428,7 +422,5 @@ int deps_ensure(Manifest *m) {
     }
   }
 
-  if (dirty)
-    lockfile_save(&lf);
   return 1;
 }
