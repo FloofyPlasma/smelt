@@ -8,8 +8,7 @@ A fast, simple build tool for C projects. Inspired by cargo. Just add a `smelt.t
 
 - Simple TOML manifest
 - Incremental builds with content hashing 
-- Parallel compilation
-- Git, pkg-config and local dependency management 
+- Registry, and pkg-config dependency management
 - Lockfile support for dependency pinning
 - Debug/release profiles
 - `compile_commands.json` generation for compatible LSP
@@ -18,47 +17,33 @@ A fast, simple build tool for C projects. Inspired by cargo. Just add a `smelt.t
 ```bash
 git clone https://github.com/floofyplasma/smelt
 cd smelt
-gcc src/cmd/build.c src/cmd/ccflags.c src/cmd/clean.c src/cmd/init.c \
-    src/core/process_posix.c src/core/stringvec.c src/pkg/deps.c \
-    src/pkg/registry.c src/project/cache.c src/project/compdb.c src/project/lock.c \
-    src/project/manifest.c src/main.c vendor/tomlc17.c vendor/xxhash.c vendor/ya_getopt.c \
-    -Isrc -Ivendor -std=c17 -o smelt
+cc -Isrc -Ivendor $(find src vendor -type f -name '*.c') $(pkg-config --cflags --libs libgit2) -o smelt
+./smelt build
 ```
 
 ## Usage
 
 ```bash
-smelt init          # scaffold new project
-smelt build         # debug build (default)
-smelt build release # release build
-smelt run           # build and run
-smelt clean         # remove build artifacts
-smelt update        # re-fetch dependencies
-smelt add <url> <file1> [file2 ...]  # add git dependency
-smelt add --pkg-config <name>        # add pkg-config dependency
-smelt add <local/path>               # add local smelt-aware dependency
+smelt init                        # scaffold new project
+smelt build                       # debug build (default)
+smelt build -p release            # release build
+smelt run                         # build and run
+smelt clean                       # remove build artifacts
+smelt update                      # re-resolve dependencies and update lockfile
+smelt add <dependency> <version>  # add registry dependency
+smelt add --pkg-config <name>     # add pkg-config dependency
 ```
 
 ## Dependencies
 
-### Git dependency (header-only or source drop-in)
+### Registry dependency
 
 ```bash
-smelt add https://github.com/Cyan4973/xxHash xxhash.h xxhash.c
-smelt add https://github.com/cktan/tomlc17 src/tomlc17. src/tomlc17.h
+smelt add xxhash 0.8.3
+smelt add tomlc17 1.0.0
 ```
 
-Files are copied to `vendor/`, `.c` files auto-added to build, `vendor/` auto-added to include paths.
-
-### Local dependency (smelt-aware)
-
-If a local library has its own `smelt.toml`, smelt reads it automatically:
-
-```bash
-smelt add ../mylib
-```
-
-Sources are compiled incrementally alongside your project.
+Dependencies are cloned to a local cache, built incrementally, and their include paths applied automatically.
 
 ### pkg-config dependency
 
@@ -71,7 +56,9 @@ Include flags and linker flags are automatically applied.
 ## Roadmap
 
 - [ ] `smelt test` command
-- [ ] Package registry with build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
+- [ ] Parallel compilation
+- [ ] Local smelt-aware dependencies (`smelt add <path>`)
+- [ ] Build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
 
 ## License
 
