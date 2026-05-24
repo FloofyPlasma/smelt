@@ -25,6 +25,12 @@ int clean_run(const Manifest *m) {
   }
 
   closedir(d);
+
+  snprintf(path, sizeof(path), "%s/.smelt_cache", m->out_dir);
+
+  if (remove(path) == 0)
+    printf("smelt: removed %s\n", path);
+
   printf("smelt: clean done\n");
   return 1;
 }

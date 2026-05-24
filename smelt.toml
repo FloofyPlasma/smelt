@@ -1,6 +1,6 @@
 [package]
 name = "smelt"
-version = "0.3.0"
+version = "0.4.0"
 
 [build]
 c_standard = "c17"
@@ -8,9 +8,9 @@ warnings = "all"
 src_dir = "src"
 out_dir = "build"
 link_flags = ["-lm"]
-defines  = []
-include_dirs = ["src", "vendor"]
-extra_sources = ["vendor/xxhash.c", "vendor/tomlc17.c", "vendor/ya_getopt.c"]
+defines = []
+include_dirs = ["src"]
+extra_sources = []
 
 [profile.debug]
 flags = ["-g", "-O0"]
@@ -19,9 +19,9 @@ flags = ["-g", "-O0"]
 flags = ["-O3", "-DNDEBUG"]
 
 [dependencies]
-testlib = { path = "./testlib" }
 xxhash = "0.8.3"
+tomlc17 = "1.0.0"
+ya_getopt = "1.0.0"
 
 [system-dependencies]
 libgit2 = { pkg-config = "libgit2" }
-

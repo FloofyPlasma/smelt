@@ -91,7 +91,7 @@ static int compile_source(const char *src, const char *art_dir,
                           const char *cxx) {
   const char *compiler = is_cpp_source(src) ? cxx : cc;
 
-  const char *base = strchr(src, '/');
+  const char *base = strrchr(src, '/');
   base = base ? base + 1 : src;
 
   char obj[MAX_PATH * 2];

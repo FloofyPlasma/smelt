@@ -64,7 +64,6 @@ int fetch_recipe(const char *name, const char *version, const ResolveCtx *ctx,
   }
 
   ensure_dirs(ctx->cache_dir);
-  fprintf(stderr, "cache_dir=%s\n", ctx->cache_dir);
 
   if (!ctx->registry_url || ctx->registry_url[0] == '\0') {
     fprintf(stderr, "smelt: no registry configured\n");

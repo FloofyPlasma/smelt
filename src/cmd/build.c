@@ -1,10 +1,16 @@
 #define _POSIX_C_SOURCE 200809L
 #include "cmd/build.h"
 #include "cmd/ccflags.h"
+#include "core/compiler.h"
 #include "core/fs.h"
 #include "core/hash.h"
 #include "core/process.h"
+#include "pkg/artcache.h"
+#include "pkg/cache.h"
+#include "pkg/depbuild.h"
+#include "pkg/resolve.h"
 #include "project/build_cache.h"
+#include "project/lock.h"
 #include "project/manifest.h"
 #include "xxhash.h"
 #include <dirent.h>
@@ -86,47 +92,112 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   // Find compiler
   const char *cc = getenv("CC");
+  const char *cxx = getenv("CXX");
   if (!cc || cc[0] == '\0')
     cc = "gcc";
+  if (!cxx || cxx[0] == '\0')
+    cxx = "g++";
   snprintf(ctx.compiler, sizeof(ctx.compiler), "%s", cc);
 
-  // Gather sources
-  if (!scan_dir(&ctx, m->src_dir))
+  char compiler_ver[256] = {0};
+  char compiler_hash[64] = {0};
+  compiler_fingerprint(cc, compiler_ver, sizeof(compiler_ver), compiler_hash,
+                       sizeof(compiler_hash));
+
+  const char *home = getenv("HOME");
+  if (!home || home[0] == '\0')
+    home = "/tmp";
+
+  char recipe_cache[MAX_PATH];
+  snprintf(recipe_cache, sizeof(recipe_cache), "%s/.cache/smelt/recipes", home);
+
+  ResolveCtx rctx = {
+      .registry_url = stringvec_len(&m->registries) > 0
+                          ? stringvec_get(&m->registries, 0)
+                          : "https://raw.githubusercontent.com/floofyplasma/"
+                            "smelt-registry/main/recipes",
+      .cache_dir = recipe_cache,
+  };
+
+  ResolvedPackageVec pkgs = {0};
+  if (!resolve_deps(m, &rctx, &pkgs)) {
+    resolved_package_vec_free(&pkgs);
     return 0;
+  }
+
+  for (size_t i = 0; i < vec_len(&pkgs); i++) {
+    ResolvedPackage *pkg = &pkgs.items[i];
+    if (pkg->git[0] == '\0' || pkg->tag[0] == '\0')
+      continue;
+
+    char commit[64] = {0};
+    char worktree[MAX_PATH * 2] = {0};
+    if (!pkg_cache_ensure(pkg->name, pkg->git, pkg->tag, commit, sizeof(commit),
+                          worktree, sizeof(worktree))) {
+      resolved_package_vec_free(&pkgs);
+      return 0;
+    }
+    snprintf(pkg->commit, sizeof(pkg->commit), "%s", commit);
+  }
+
+  lockfile_write(&pkgs);
+
+  DepBuildCtx dctx = {
+      .cc = cc,
+      .cxx = cxx,
+      .compiler_hash = compiler_hash,
+      .out_dir = m->out_dir,
+      .profile = profile,
+  };
+
+  BuiltDepVec built_deps = {0};
+  if (!depbuild_run(&pkgs, &dctx, &built_deps)) {
+    resolved_package_vec_free(&pkgs);
+    builtdep_vec_free(&built_deps);
+    return 0;
+  }
+
+  resolved_package_vec_free(&pkgs);
+
+  // Gather sources
+  if (!scan_dir(&ctx, m->src_dir)) {
+    builtdep_vec_free(&built_deps);
+    return 0;
+  }
 
   for (size_t i = 0; i < stringvec_len(&m->dep_sources); i++) {
     if (!stringvec_push(&ctx.sources, stringvec_get(&m->dep_sources, i))) {
       fprintf(stderr, "smelt: too many sources\n");
+      builtdep_vec_free(&built_deps);
       return 0;
     }
   }
 
   if (stringvec_len(&ctx.sources) == 0) {
     fprintf(stderr, "smelt: no .c files found in %s\n", m->src_dir);
+    builtdep_vec_free(&built_deps);
     return 0;
   }
 
   ensure_dirs(m->out_dir);
 
   StringVec flags = {0};
-
-  if (!ccflags_build_vec(m, profile, &flags, 0))
+  if (!ccflags_build_vec(m, profile, &flags, 0)) {
+    builtdep_vec_free(&built_deps);
     return 0;
-
-  printf("smelt: profile=%s\n", profile);
-
-  Process ver_proc = {0};
-
-  process_argv_push(&ver_proc, ctx.compiler);
-  process_argv_push(&ver_proc, "--version");
-
-  char compiler_ver[256] = {0};
-
-  if (process_capture(&ver_proc, compiler_ver, sizeof(compiler_ver))) {
-    compiler_ver[strcspn(compiler_ver, "\n")] = '\0';
   }
 
-  process_free(&ver_proc);
+  for (size_t i = 0; i < vec_len(&built_deps); i++) {
+    const BuiltDep *bd = &built_deps.items[i];
+    for (size_t j = 0; j < stringvec_len(&bd->public_includes); j++) {
+      char flag[MAX_PATH * 2];
+      snprintf(flag, sizeof(flag), "-I%s",
+               stringvec_get(&bd->public_includes, j));
+      stringvec_push_unique(&flags, flag);
+    }
+  }
+
+  printf("smelt: profile=%s\n", profile);
 
   BuildCache cache;
   cache_load(&cache);
@@ -145,7 +216,6 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     const char *src = stringvec_get(&ctx.sources, i);
-
     const char *base = strrchr(src, '/');
     base = base ? base + 1 : src;
 
@@ -176,29 +246,24 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     }
 
     Process proc = {0};
-
     process_argv_push(&proc, ctx.compiler);
-
     process_argv_extend(&proc, &flags);
-
     process_argv_push(&proc, "-MMD");
     process_argv_push(&proc, "-c");
-
     process_argv_push(&proc, src);
-
     process_argv_push(&proc, "-o");
     process_argv_push(&proc, obj);
-
     process_print(&proc);
 
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: compile failed: %s\n", src);
       process_free(&proc);
+      stringvec_free(&flags);
+      stringvec_free(&obj_files);
+      builtdep_vec_free(&built_deps);
       return 0;
     }
-
     process_free(&proc);
-
     any_compiled = 1;
   }
 
@@ -216,21 +281,29 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   if (any_compiled || flags_changed) {
     Process proc = {0};
-
     process_argv_push(&proc, ctx.compiler);
 
     process_argv_extend(&proc, &obj_files);
     process_argv_extend(&proc, &m->extra_sources);
+
+    for (size_t i = 0; i < vec_len(&built_deps); i++) {
+      const BuiltDep *bd = &built_deps.items[i];
+      for (size_t j = 0; j < stringvec_len(&bd->link_flags); j++)
+        process_argv_push(&proc, stringvec_get(&bd->link_flags, j));
+    }
+
     process_argv_extend(&proc, &m->link_flags);
 
     process_argv_push(&proc, "-o");
     process_argv_push(&proc, output);
-
     process_print(&proc);
 
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: link failed\n");
       process_free(&proc);
+      stringvec_free(&flags);
+      stringvec_free(&obj_files);
+      builtdep_vec_free(&built_deps);
       return 0;
     }
 
@@ -251,6 +324,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   stringvec_free(&flags);
   stringvec_free(&obj_files);
+  builtdep_vec_free(&built_deps);
   return 1;
 }
 

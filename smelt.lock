@@ -3,8 +3,24 @@
 [[package]]
 name     = "xxhash"
 version  = "0.8.3"
-commit   = ""
+commit   = "e626a72bc2321cd320e953a0ccf1584cad60f363"
 git      = "https://github.com/Cyan4973/xxHash"
 tag      = "v0.8.3"
+direct   = true
+
+[[package]]
+name     = "tomlc17"
+version  = "1.0.0"
+commit   = "cb9bba39f2e63a9e67fa61d6c7521a184eb5fc38"
+git      = "https://github.com/cktan/tomlc17"
+tag      = "R260517"
+direct   = true
+
+[[package]]
+name     = "ya_getopt"
+version  = "1.0.0"
+commit   = "6ce431085b81d9bb8639ed2f858c4f4fbc3ab988"
+git      = "https://github.com/FloofyPlasma/ya_getopt"
+tag      = "v1.0.0"
 direct   = true
 
