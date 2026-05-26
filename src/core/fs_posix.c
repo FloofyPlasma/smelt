@@ -21,6 +21,19 @@ void ensure_dirs(const char *path) {
   mkdir(tmp, 0755);
 }
 
+static int ends_with(const char *s, const char *suffix) {
+  size_t slen = strlen(s);
+  size_t suflen = strlen(suffix);
+  if (suflen > slen)
+    return 0;
+  return strcmp(s + slen - suflen, suffix) == 0;
+}
+
+int is_c_source(const char *f) { return ends_with(f, ".c"); }
+int is_cpp_source(const char *f) {
+  return ends_with(f, ".C") || ends_with(f, ".cpp") || ends_with(f, ".cc") ||
+         ends_with(f, ".cxx");
+}
 int scan_dir(BuildCtx *ctx, const char *dir) {
   DIR *d = opendir(dir);
   if (!d) {
@@ -42,7 +55,8 @@ int scan_dir(BuildCtx *ctx, const char *dir) {
 
     if (S_ISDIR(st.st_mode)) {
       scan_dir(ctx, path);
-    } else if (S_ISREG(st.st_mode) && ends_with_c(entry->d_name)) {
+    } else if (S_ISREG(st.st_mode) &&
+               (is_c_source(entry->d_name) || is_cpp_source(entry->d_name))) {
       if (!stringvec_push(&ctx->sources, path)) {
         fprintf(stderr, "smelt: out of memory\n");
         closedir(d);

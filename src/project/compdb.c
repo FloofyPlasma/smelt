@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 // TODO(FloofyPlasma): clean this up and make it less shitty
+// TODO(FloofyPlasma): proper cpp support
 int compdb_write(const Manifest *m, const BuildCtx *ctx) {
   FILE *fp = fopen("compile_commands.json", "we");
   if (!fp) {

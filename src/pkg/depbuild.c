@@ -14,20 +14,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-static int ends_with(const char *s, const char *suffix) {
-  size_t slen = strlen(s);
-  size_t suflen = strlen(suffix);
-  if (suflen > slen)
-    return 0;
-  return strcmp(s + slen - suflen, suffix) == 0;
-}
-
-static int is_c_source(const char *f) { return ends_with(f, ".c"); }
-static int is_cpp_source(const char *f) {
-  return ends_with(f, ".C") || ends_with(f, ".cpp") || ends_with(f, ".cc") ||
-         ends_with(f, ".cxx");
-}
-
 static int collect_sources(const Recipe *r, const StringVec *features,
                            const char *worktree, StringVec *out) {
   for (size_t i = 0; i < stringvec_len(&r->files.base); i++) {

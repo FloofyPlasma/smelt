@@ -181,8 +181,14 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
 
   ensure_dirs(m->out_dir);
 
-  StringVec flags = {0};
-  if (!ccflags_build_vec(m, profile, &flags, 0)) {
+  StringVec c_flags = {0};
+  StringVec cpp_flags = {0};
+  if (!ccflags_build_vec(m, profile, &c_flags, 0, LANGUAGE_C)) {
+    builtdep_vec_free(&built_deps);
+    return 0;
+  }
+  if (!ccflags_build_vec(m, profile, &cpp_flags, 0, LANGUAGE_CPP)) {
+    stringvec_free(&c_flags);
     builtdep_vec_free(&built_deps);
     return 0;
   }
@@ -193,7 +199,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
       char flag[MAX_PATH * 2];
       snprintf(flag, sizeof(flag), "-I%s",
                stringvec_get(&bd->public_includes, j));
-      stringvec_push_unique(&flags, flag);
+      stringvec_push_unique(&c_flags, flag);
     }
   }
 
@@ -203,7 +209,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   cache_load(&cache);
 
   char flags_hash[MAX_HASH];
-  cache_hash_vec(&flags, flags_hash, sizeof(flags_hash));
+  cache_hash_vec(&c_flags, flags_hash, sizeof(flags_hash));
   int flags_changed = strcmp(flags_hash, cache.flags_hash) != 0 ||
                       strcmp(compiler_ver, cache.compiler_ver) != 0;
   if (flags_changed)
@@ -227,7 +233,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     stringvec_push(&obj_files, obj);
 
     new_hashes[i][0] = '\0';
-    hash_source_and_deps(src, m->out_dir, &flags, new_hashes[i], MAX_HASH);
+    hash_source_and_deps(src, m->out_dir, &c_flags, new_hashes[i], MAX_HASH);
 
     const char *old_hash = cache_get(&cache, src);
     needs_compile[i] =
@@ -245,9 +251,12 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
       continue;
     }
 
+    const char *compiler = is_c_source(src) ? cc : cxx;
+    const StringVec *flags = is_c_source(src) ? &c_flags : &cpp_flags;
+
     Process proc = {0};
-    process_argv_push(&proc, ctx.compiler);
-    process_argv_extend(&proc, &flags);
+    process_argv_push(&proc, compiler);
+    process_argv_extend(&proc, flags);
     process_argv_push(&proc, "-MMD");
     process_argv_push(&proc, "-c");
     process_argv_push(&proc, src);
@@ -258,7 +267,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: compile failed: %s\n", src);
       process_free(&proc);
-      stringvec_free(&flags);
+      stringvec_free(&c_flags);
+      stringvec_free(&cpp_flags);
       stringvec_free(&obj_files);
       builtdep_vec_free(&built_deps);
       return 0;
@@ -271,7 +281,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     if (!needs_compile[i])
       continue;
     char final_hash[MAX_HASH] = {0};
-    hash_source_and_deps(stringvec_get(&ctx.sources, i), m->out_dir, &flags,
+    hash_source_and_deps(stringvec_get(&ctx.sources, i), m->out_dir, &c_flags,
                          final_hash, MAX_HASH);
     cache_set(&cache, stringvec_get(&ctx.sources, i), final_hash);
   }
@@ -301,7 +311,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
     if (!process_run(&proc)) {
       fprintf(stderr, "smelt: link failed\n");
       process_free(&proc);
-      stringvec_free(&flags);
+      stringvec_free(&c_flags);
+      stringvec_free(&cpp_flags);
       stringvec_free(&obj_files);
       builtdep_vec_free(&built_deps);
       return 0;
@@ -322,7 +333,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   if (ctx_out)
     *ctx_out = ctx;
 
-  stringvec_free(&flags);
+  stringvec_free(&c_flags);
+  stringvec_free(&cpp_flags);
   stringvec_free(&obj_files);
   builtdep_vec_free(&built_deps);
   return 1;

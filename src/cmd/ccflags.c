@@ -31,11 +31,17 @@ int ccflags_write_command_line(const Manifest *manifest, const char *profile,
 }
 
 int ccflags_build_vec(const Manifest *manifest, const char *profile,
-                      StringVec *out, int no_defines) {
+                      StringVec *out, int no_defines, Language language) {
   char buf[512];
 
-  if (manifest->c_standard[0]) {
+  if (manifest->c_standard[0] && language == LANGUAGE_C) {
     snprintf(buf, sizeof(buf), "-std=%s", manifest->c_standard);
+    if (!stringvec_push(out, buf))
+      return 0;
+  }
+
+  if (manifest->cpp_standard[0] && language == LANGUAGE_CPP) {
+    snprintf(buf, sizeof(buf), "-std=%s", manifest->cpp_standard);
     if (!stringvec_push(out, buf))
       return 0;
   }

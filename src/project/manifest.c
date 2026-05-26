@@ -116,12 +116,15 @@ int manifest_load(const char *path, Manifest *out) {
   if (ver.type == TOML_STRING)
     scopy(out->version, sizeof(out->version), ver.u.s);
 
-  toml_datum_t std = toml_seek(t, "build.c_standard");
+  toml_datum_t std_c = toml_seek(t, "build.c_standard");
+  toml_datum_t std_cpp = toml_seek(t, "build.cpp_standard");
   toml_datum_t warn = toml_seek(t, "build.warnings");
   toml_datum_t src = toml_seek(t, "build.src_dir");
   toml_datum_t odir = toml_seek(t, "build.out_dir");
-  if (std.type == TOML_STRING)
-    scopy(out->c_standard, sizeof(out->c_standard), std.u.s);
+  if (std_c.type == TOML_STRING)
+    scopy(out->c_standard, sizeof(out->c_standard), std_c.u.s);
+  if (std_cpp.type == TOML_STRING)
+    scopy(out->cpp_standard, sizeof(out->cpp_standard), std_cpp.u.s);
   if (warn.type == TOML_STRING)
     scopy(out->warnings, sizeof(out->warnings), warn.u.s);
   if (src.type == TOML_STRING)

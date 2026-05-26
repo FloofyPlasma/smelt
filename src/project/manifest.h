@@ -49,6 +49,7 @@ typedef struct {
   char name[MAX_NAME];
   char version[MAX_STR];
   char c_standard[32];
+  char cpp_standard[32];
   char warnings[32];
   char src_dir[MAX_PATH];
   char out_dir[MAX_PATH];
