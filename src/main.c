@@ -187,7 +187,6 @@ int main(int argc, char **argv) {
     if (argc < 4) {
       fprintf(stderr, "usage: smelt add <name> <version>\n");
       fprintf(stderr, "       smelt add --pkg-config <package>\n");
-      fprintf(stderr, "       smelt add --link <flag> <name>\n");
       return 1;
     }
 
