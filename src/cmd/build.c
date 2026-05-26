@@ -94,9 +94,9 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   const char *cc = getenv("CC");
   const char *cxx = getenv("CXX");
   if (!cc || cc[0] == '\0')
-    cc = "gcc";
+    cc = "cc";
   if (!cxx || cxx[0] == '\0')
-    cxx = "g++";
+    cxx = "c++";
   snprintf(ctx.compiler, sizeof(ctx.compiler), "%s", cc);
 
   char compiler_ver[256] = {0};
