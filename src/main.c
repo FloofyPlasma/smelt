@@ -148,9 +148,11 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1], "build") == 0) {
     const char *profile = "debug";
+    const char *target_name = NULL;
 
     static const struct option build_longopts[] = {
         {"profile", required_argument, 0, 'p'},
+        {"target", required_argument, 0, 't'},
         {0, 0, 0, 0},
     };
 
@@ -160,6 +162,9 @@ int main(int argc, char **argv) {
       switch (c) {
       case 'p':
         profile = optarg;
+        break;
+      case 't':
+        target_name = optarg;
         break;
       default: /* ? */
         fprintf(stderr, "smelt: command-line error\n");
@@ -179,13 +184,52 @@ int main(int argc, char **argv) {
       git_deps_free();
       return 1;
     }
-    if (!build_run(&m, &ctx, profile)) {
-      manifest_free(&m);
-      git_deps_free();
-      return 1;
+    int build_ok = 1;
+    if (vec_len(&m.targets) == 0) {
+      if (!build_run(&m, &ctx, profile, NULL)) {
+        build_ok = 0;
+      } else {
+        compdb_write(&m, &ctx);
+      }
+      buildctx_free(&ctx);
+    } else if (target_name) {
+      // -t <name>: build exactly one named target
+      const Target *tgt = NULL;
+      for (size_t i = 0; i < vec_len(&m.targets); i++) {
+        if (strcmp(m.targets.items[i].name, target_name) == 0) {
+          tgt = &m.targets.items[i];
+          break;
+        }
+      }
+      if (!tgt) {
+        fprintf(stderr, "smelt: unknown target '%s'\n", target_name);
+        manifest_free(&m);
+        git_deps_free();
+        return 1;
+      }
+      if (!build_run(&m, &ctx, profile, tgt)) {
+        build_ok = 0;
+      } else {
+        compdb_write(&m, &ctx);
+      }
+      buildctx_free(&ctx);
+    } else {
+      // no -t flag: build every declared target
+      for (size_t i = 0; i < vec_len(&m.targets); i++) {
+        const Target *tgt = &m.targets.items[i];
+        printf("smelt: building target '%s'\n", tgt->name);
+        BuildCtx tctx = {0};
+        if (!build_run(&m, &tctx, profile, tgt)) {
+          build_ok = 0;
+          buildctx_free(&tctx);
+          break;
+        }
+        if (i == vec_len(&m.targets) - 1)
+          compdb_write(&m, &tctx);
+        buildctx_free(&tctx);
+      }
     }
-    compdb_write(&m, &ctx);
-    buildctx_free(&ctx);
+
     manifest_free(&m);
     git_deps_free();
     return 0;
@@ -193,9 +237,11 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1], "run") == 0) {
     const char *profile = "debug";
+    const char *target_name = NULL;
 
     static const struct option run_longopts[] = {
         {"profile", required_argument, 0, 'p'},
+        {"target", required_argument, 0, 't'},
         {0, 0, 0, 0},
     };
 
@@ -204,6 +250,9 @@ int main(int argc, char **argv) {
       switch (c) {
       case 'p':
         profile = optarg;
+        break;
+      case 't':
+        target_name = optarg;
         break;
       default: /* ? */
         fprintf(stderr, "smelt: command-line error\n");
@@ -222,14 +271,33 @@ int main(int argc, char **argv) {
       git_deps_free();
       return 1;
     }
-    if (!build_run(&m, NULL, profile)) {
+
+    const Target *run_tgt = NULL;
+    if (target_name) {
+      for (size_t i = 0; i < vec_len(&m.targets); i++) {
+        if (strcmp(m.targets.items[i].name, target_name) == 0) {
+          run_tgt = &m.targets.items[i];
+          break;
+        }
+      }
+      if (!run_tgt) {
+        fprintf(stderr, "smelt: unknown target '%s'\n", target_name);
+        manifest_free(&m);
+        git_deps_free();
+        return 1;
+      }
+    }
+
+    if (!build_run(&m, NULL, profile, run_tgt)) {
       manifest_free(&m);
       git_deps_free();
       return 1;
     }
 
+    const char *run_out_name =
+        (run_tgt && run_tgt->out[0]) ? run_tgt->out : m.name;
     char output[MAX_PATH * 2];
-    snprintf(output, sizeof(output), "%s/%s", m.out_dir, m.name);
+    snprintf(output, sizeof(output), "%s/%s", m.out_dir, run_out_name);
 
     char *child_args[256] = {output};
     int child_argc = 1;

@@ -87,7 +87,19 @@ static int hash_source_and_deps(const char *src, const char *obj_dir,
   return 1;
 }
 
-int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
+static int source_excluded(const Target *target, const char *src) {
+  if (!target)
+    return 0;
+  const char *base = strrchr(src, '/');
+  base = base ? base + 1 : src;
+  for (size_t i = 0; i < stringvec_len(&target->exclude); i++)
+    if (strcmp(stringvec_get(&target->exclude, i), base) == 0)
+      return 1;
+  return 0;
+}
+
+int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
+              const Target *target) {
   BuildCtx ctx = {0};
 
   // Find compiler
@@ -171,6 +183,24 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
       builtdep_vec_free(&built_deps);
       return 0;
     }
+  }
+
+  if (target) {
+    StringVec filtered = {0};
+    for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
+      const char *src = stringvec_get(&ctx.sources, i);
+      if (!source_excluded(target, src)) {
+        if (!stringvec_push(&filtered, src)) {
+          stringvec_free(&filtered);
+          builtdep_vec_free(&built_deps);
+          return 0;
+        }
+      } else {
+        printf("smelt: [%s] exclude %s\n", target->name, src);
+      }
+    }
+    stringvec_free(&ctx.sources);
+    ctx.sources = filtered;
   }
 
   if (stringvec_len(&ctx.sources) == 0) {
@@ -287,7 +317,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile) {
   }
 
   char output[MAX_PATH * 2];
-  snprintf(output, sizeof(output), "%s/%s", m->out_dir, m->name);
+  const char *out_name = (target && target->out[0]) ? target->out : m->name;
+  snprintf(output, sizeof(output), "%s/%s", m->out_dir, out_name);
 
   if (any_compiled || flags_changed) {
     Process proc = {0};

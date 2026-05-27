@@ -199,6 +199,36 @@ int manifest_load(const char *path, Manifest *out) {
                    "smelt-registry/main/recipes");
   }
 
+  toml_datum_t targets_tbl = toml_seek(t, "target");
+  if (targets_tbl.type == TOML_TABLE) {
+    for (int i = 0; i < targets_tbl.u.tab.size; i++) {
+      const char *tname = targets_tbl.u.tab.key[i];
+      if (!tname)
+        continue;
+      toml_datum_t tentry = toml_get(targets_tbl, tname);
+      if (tentry.type != TOML_TABLE)
+        continue;
+
+      Target tgt = {0};
+      scopy(tgt.name, sizeof(tgt.name), tname);
+
+      toml_datum_t tout = toml_get(tentry, "out");
+      if (tout.type == TOML_STRING)
+        scopy(tgt.out, sizeof(tgt.out), tout.u.s);
+      else
+        scopy(tgt.out, sizeof(tgt.out), tname);
+
+      parse_str_array(tentry, "exclude", &tgt.exclude);
+
+      if (!vec_push(&out->targets, tgt)) {
+        stringvec_free(&tgt.exclude);
+        toml_free(result);
+        manifest_free(out);
+        return 0;
+      }
+    }
+  }
+
   toml_free(result);
   return 1;
 }
@@ -207,6 +237,9 @@ void manifest_free(Manifest *m) {
   for (size_t i = 0; i < vec_len(&m->deps); i++)
     stringvec_free(&m->deps.items[i].features);
   vec_free(&m->deps);
+  for (size_t i = 0; i < vec_len(&m->targets); i++)
+    stringvec_free(&m->targets.items[i].exclude);
+  vec_free(&m->targets);
 
   stringvec_free(&m->extra_sources);
   stringvec_free(&m->include_dirs);
@@ -266,6 +299,14 @@ int manifest_save(const char *path, const Manifest *m) {
   fprintf(fp, "[profile.release]\n");
   write_str_array(fp, "flags", &m->release.flags);
   fprintf(fp, "\n");
+
+  for (size_t i = 0; i < vec_len(&m->targets); i++) {
+    const Target *tgt = &m->targets.items[i];
+    fprintf(fp, "[target.%s]\n", tgt->name);
+    fprintf(fp, "out = \"%s\"\n", tgt->out);
+    write_str_array(fp, "exclude", &tgt->exclude);
+    fprintf(fp, "\n");
+  }
 
   int has_deps = 0;
   for (size_t i = 0; i < vec_len(&m->deps); i++) {

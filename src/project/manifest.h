@@ -47,6 +47,14 @@ typedef struct {
 
 typedef struct {
   char name[MAX_NAME];
+  char out[MAX_PATH];
+  StringVec exclude;
+} Target;
+
+typedef VEC(Target) TargetVec;
+
+typedef struct {
+  char name[MAX_NAME];
   char version[MAX_STR];
   char c_standard[32];
   char cpp_standard[32];
@@ -65,6 +73,8 @@ typedef struct {
 
   Profile debug;
   Profile release;
+
+  TargetVec targets;
 } Manifest;
 
 void manifest_free(Manifest *m);

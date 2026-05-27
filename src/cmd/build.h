@@ -11,7 +11,8 @@ typedef struct {
   StringVec sources;
 } BuildCtx;
 
-int build_run(const Manifest *m, BuildCtx *ctx_cout, const char *profile);
+int build_run(const Manifest *m, BuildCtx *ctx_cout, const char *profile,
+              const Target *target);
 void buildctx_free(BuildCtx *ctx);
 
 #endif
