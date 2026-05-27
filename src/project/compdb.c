@@ -3,6 +3,7 @@
 #include "cmd/ccflags.h"
 #include "project/manifest.h"
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 // TODO(FloofyPlasma): clean this up and make it less shitty
@@ -23,6 +24,12 @@ int compdb_write(const Manifest *m, const BuildCtx *ctx) {
 
   char cmdline[4096] = {0};
   ccflags_write_command_line(m, NULL, cmdline, sizeof(cmdline), 1);
+
+  int clen = strlen(cmdline);
+  for (size_t i = 0; i < stringvec_len(&ctx->dep_include_flags); i++) {
+    clen += snprintf(cmdline + clen, sizeof(cmdline) - clen, "%s ",
+                     stringvec_get(&ctx->dep_include_flags, i));
+  }
 
   char extra[2048] = {0};
   int epos = 0;

@@ -9,6 +9,7 @@
 typedef struct {
   char compiler[MAX_PATH];
   StringVec sources;
+  StringVec dep_include_flags;
 } BuildCtx;
 
 int build_run(const Manifest *m, BuildCtx *ctx_cout, const char *profile,

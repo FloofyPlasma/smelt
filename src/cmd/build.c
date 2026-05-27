@@ -230,6 +230,8 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
       snprintf(flag, sizeof(flag), "-I%s",
                stringvec_get(&bd->public_includes, j));
       stringvec_push_unique(&c_flags, flag);
+      stringvec_push_unique(&cpp_flags, flag);
+      stringvec_push_unique(&ctx.dep_include_flags, flag);
     }
   }
 
@@ -371,4 +373,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
   return 1;
 }
 
-void buildctx_free(BuildCtx *ctx) { stringvec_free(&ctx->sources); }
+void buildctx_free(BuildCtx *ctx) {
+  stringvec_free(&ctx->sources);
+  stringvec_free(&ctx->dep_include_flags);
+}
