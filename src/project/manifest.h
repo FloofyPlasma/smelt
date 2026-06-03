@@ -43,6 +43,7 @@ typedef VEC(Dep) DepVec;
 
 typedef struct {
   StringVec flags;
+  StringVec link_flags;
 } Profile;
 
 typedef struct {

@@ -334,8 +334,10 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
       for (size_t j = 0; j < stringvec_len(&bd->link_flags); j++)
         process_argv_push(&proc, stringvec_get(&bd->link_flags, j));
     }
-
+    const Profile *prof =
+        (profile && strcmp(profile, "release") == 0) ? &m->release : &m->debug;
     process_argv_extend(&proc, &m->link_flags);
+    process_argv_extend(&proc, &prof->link_flags);
 
     process_argv_push(&proc, "-o");
     process_argv_push(&proc, output);

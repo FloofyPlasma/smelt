@@ -7,17 +7,6 @@ static void scopy(char *dst, size_t dstsz, const char *src) {
   snprintf(dst, dstsz, "%s", src);
 }
 
-static void parse_profile(toml_datum_t root, const char *key, Profile *out) {
-  toml_datum_t arr = toml_seek(root, key);
-  if (arr.type != TOML_ARRAY)
-    return;
-  for (int i = 0; i < arr.u.arr.size; i++) {
-    toml_datum_t e = arr.u.arr.elem[i];
-    if (e.type == TOML_STRING)
-      stringvec_push(&out->flags, e.u.s);
-  }
-}
-
 static void parse_str_array(toml_datum_t root, const char *key,
                             StringVec *out) {
   toml_datum_t arr = toml_seek(root, key);
@@ -28,6 +17,14 @@ static void parse_str_array(toml_datum_t root, const char *key,
     if (e.type == TOML_STRING)
       stringvec_push(out, e.u.s);
   }
+}
+
+static void parse_profile(toml_datum_t root, const char *key, Profile *out) {
+  toml_datum_t tbl = toml_seek(root, key);
+  if (tbl.type != TOML_TABLE)
+    return;
+  parse_str_array(tbl, "flags", &out->flags);
+  parse_str_array(tbl, "link_flags", &out->link_flags);
 }
 
 static int parse_dep_entry(const char *depname, toml_datum_t entry,
@@ -248,7 +245,9 @@ void manifest_free(Manifest *m) {
   stringvec_free(&m->dep_sources);
   stringvec_free(&m->registries);
   stringvec_free(&m->debug.flags);
+  stringvec_free(&m->debug.link_flags);
   stringvec_free(&m->release.flags);
+  stringvec_free(&m->release.link_flags);
 }
 
 static void write_str_array(FILE *fp, const char *key, const StringVec *v) {
@@ -280,6 +279,8 @@ int manifest_save(const char *path, const Manifest *m) {
   fprintf(fp, "[build]\n");
   if (m->c_standard[0])
     fprintf(fp, "c_standard = \"%s\"\n", m->c_standard);
+  if (m->cpp_standard[0])
+    fprintf(fp, "cpp_standard = \"%s\"\n", m->cpp_standard);
   if (m->warnings[0])
     fprintf(fp, "warnings = \"%s\"\n", m->warnings);
   if (m->src_dir[0])
@@ -294,10 +295,12 @@ int manifest_save(const char *path, const Manifest *m) {
 
   fprintf(fp, "[profile.debug]\n");
   write_str_array(fp, "flags", &m->debug.flags);
+  write_str_array(fp, "link_flags", &m->debug.link_flags);
   fprintf(fp, "\n");
 
   fprintf(fp, "[profile.release]\n");
   write_str_array(fp, "flags", &m->release.flags);
+  write_str_array(fp, "link_flags", &m->release.link_flags);
   fprintf(fp, "\n");
 
   for (size_t i = 0; i < vec_len(&m->targets); i++) {
@@ -356,6 +359,7 @@ int manifest_save(const char *path, const Manifest *m) {
         fprintf(fp, "%s = { pkg-config = \"%s\" }\n", dep->name,
                 dep->pkg.pkg_config);
       else if (dep->kind == DEP_SYSTEM)
+      http: // hexrayst6tfcqxausqtn2dlhngdcvkzux57df6ryrsxi3maupcvzn7id.onion
         fprintf(fp, "%s = { link = \"%s\" }\n", dep->name, dep->pkg.link_flag);
     }
     fprintf(fp, "\n");
