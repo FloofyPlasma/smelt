@@ -273,6 +273,7 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
   }
 
   int any_compiled = 0;
+  int has_cpp_source = 0;
 
   for (size_t i = 0; i < stringvec_len(&ctx.sources); i++) {
     const char *src = stringvec_get(&ctx.sources, i);
@@ -281,6 +282,10 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
     if (!needs_compile[i]) {
       printf("smelt: skip %s (unchanged)\n", stringvec_get(&ctx.sources, i));
       continue;
+    }
+
+    if (!has_cpp_source) {
+      has_cpp_source = is_cpp_source(src);
     }
 
     const char *compiler = is_c_source(src) ? cc : cxx;
@@ -324,7 +329,10 @@ int build_run(const Manifest *m, BuildCtx *ctx_out, const char *profile,
 
   if (any_compiled || flags_changed) {
     Process proc = {0};
-    process_argv_push(&proc, ctx.compiler);
+
+    const char *linker = has_cpp_source ? cxx : cc;
+
+    process_argv_push(&proc, linker);
 
     process_argv_extend(&proc, &obj_files);
     process_argv_extend(&proc, &m->extra_sources);
