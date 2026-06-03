@@ -139,8 +139,8 @@ int manifest_load(const char *path, Manifest *out) {
   if (out->out_dir[0] == '\0')
     scopy(out->out_dir, sizeof(out->out_dir), "build");
 
-  parse_profile(t, "profile.debug.flags", &out->debug);
-  parse_profile(t, "profile.release.flags", &out->release);
+  parse_profile(t, "profile.debug", &out->debug);
+  parse_profile(t, "profile.release", &out->release);
 
   if (stringvec_len(&out->debug.flags) == 0) {
     stringvec_push(&out->debug.flags, "-g");
