@@ -17,6 +17,7 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/token.cpp" \
   "$ROOT/src/smelt_core/lexer.cpp" \
   "$ROOT/src/smelt_core/parser.cpp" \
+  "$ROOT/src/smelt_core/sema.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -o "$OUT/smelt"
 
