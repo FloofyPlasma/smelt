@@ -1,0 +1,26 @@
+project "smelt" {
+    version = "0.0.1";
+    cxx_std = 20;
+    c_std = 17;
+}
+
+profile debug {
+    optimization = none;
+    debug_info = true;
+}
+
+profile release {
+    optimization = speed;
+    debug_info = false;
+}
+
+target "smelt_core" {
+    type = static_lib;
+    export = true;
+    public_includes = ["src/smelt_core"];
+}
+
+target "smelt" {
+    type = exe;
+    depends = ["smelt_core"];
+}
