@@ -1,0 +1,25 @@
+project "app" {
+    version = "0.1.0";
+    cxx_std = 20;
+}
+
+profile debug {
+    optimization = none;
+    debug_info = true;
+}
+
+profile release {
+    optimization = speed;
+    debug_info = false;
+}
+
+target "core" {
+    type = static_lib;
+    export = true;
+    public_includes = ["include"];
+}
+
+target "app" {
+    type = exe;
+    depends = ["core"];
+}
