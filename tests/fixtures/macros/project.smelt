@@ -1,0 +1,15 @@
+project "macros" {
+    version = "0.1.0";
+    cxx_std = 20;
+}
+
+profile debug {
+    optimization = none;
+    debug_info = true;
+    defines = ["DEBUG_LEVEL=1"];
+}
+
+target "app" {
+    type = exe;
+    defines = ["DEBUG_LEVEL=2"];
+}

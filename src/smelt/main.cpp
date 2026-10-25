@@ -120,6 +120,11 @@ int main(int argc, char **argv) {
     sources.push_back(std::move(*map));
   }
 
+  if (!smelt::checkOwnership(sources, *ws, diags)) {
+    printDiagnostics(diags);
+    return 1;
+  }
+
   smelt::Builder builder(*ws, sources, *profile);
   const auto &rootTargets = ws->packages[0].model.targets;
 

@@ -1,0 +1,13 @@
+project "overlap" {
+    version = "0.1.0";
+}
+
+target "a" {
+    type = static_lib;
+    source_dir = "src";
+}
+
+target "b" {
+    type = static_lib;
+    source_dir = "src";
+}

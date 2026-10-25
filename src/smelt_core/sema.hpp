@@ -22,6 +22,7 @@ struct ProfileInfo {
   std::string name;
   Optimization optimization = Optimization::None;
   bool debugInfo = true;
+  std::vector<std::string> defines;
 };
 
 struct NameRef {

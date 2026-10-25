@@ -4,6 +4,7 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -142,6 +143,22 @@ auto stdFlag(const ProjectInfo &pr, const bool cxx) -> std::string {
   const int s = pr.cStd.value_or(17);
   return "-std=c" + std::to_string(s);
 }
+
+auto parseDefine(const std::string &text, const std::string &source,
+                 const int rank) -> Builder::Define {
+  Builder::Define d;
+  d.source = source;
+  d.rank = rank;
+  const std::size_t eq = text.find('=');
+  if (eq == std::string::npos) {
+    d.name = text;
+  } else {
+    d.name = text.substr(0, eq);
+    d.value = text.substr(eq + 1);
+    d.hasValue = true;
+  }
+  return d;
+}
 } // namespace
 
 Builder::Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
@@ -170,9 +187,16 @@ auto Builder::outDir(const NodeKey &n) const -> fs::path {
 void Builder::addPublic(const NodeKey &n, Usage &u) const {
   const Package &p = ws_.packages[n.first];
   const TargetInfo &t = target(n);
+  const std::string owner = p.model.project.name + ":" + t.name;
+
   for (const auto &d : t.publicIncludes)
     u.includes.push_back((p.root / d).string());
-  u.defines.insert(u.defines.end(), t.defines.begin(), t.defines.end());
+
+  for (const auto &raw : t.defines) {
+    Define def = parseDefine(raw, owner, 3);
+    u.defines.push_back(std::move(def));
+  }
+
   u.options.insert(u.options.end(), t.compileOptions.begin(),
                    t.compileOptions.end());
   u.link.insert(u.link.end(), t.link.begin(), t.link.end());
@@ -197,12 +221,19 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   for (const auto &d : t.privateIncludes)
     u.includes.push_back((p.root / d).string());
 
+  for (const auto &raw : profile_.defines) {
+    u.defines.push_back(parseDefine(raw, "profile " + profile_.name, 1));
+  }
+
+  const std::string owner = p.model.project.name + ":" + t.name;
+  for (const auto &raw : t.defines)
+    u.defines.push_back(parseDefine(raw, owner, 2));
+
   addPublic(n, u);
   std::set<NodeKey> seen{n};
   walkDeps(n, seen, u);
 
   dedupe(u.includes);
-  dedupe(u.defines);
   dedupe(u.options);
   dedupe(u.link);
   return u;
@@ -249,13 +280,66 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
   if (profile_.debugInfo)
     args.push_back("-g");
 
-  for (const auto &d : u.defines)
+  for (const auto &d : resolveDefines(u).value_or(std::vector<std::string>{}))
     args.push_back("-D" + d);
+
   args.insert(args.end(), u.options.begin(), u.options.end());
   for (const auto &i : u.includes)
     args.push_back("-I" + i);
 
   return args;
+}
+
+auto Builder::resolveDefines(const Usage &u) const
+    -> std::optional<std::vector<std::string>> {
+  std::map<std::string, std::map<std::string, Define>> bySource;
+  std::map<std::string, std::size_t> sourceOrder;
+
+  for (const auto &d : u.defines) {
+    bySource[d.source][d.name] = d;
+    sourceOrder.emplace(d.source, sourceOrder.size());
+  }
+
+  std::vector<Define> sourcesFlat;
+  for (const auto &[source, macros] : bySource) {
+    for (const auto &[name, def] : macros)
+      sourcesFlat.push_back(def);
+  }
+  std::stable_sort(
+      sourcesFlat.begin(), sourcesFlat.end(),
+      [](const Define &a, const Define &b) { return a.rank < b.rank; });
+
+  std::map<std::string, Define> merged;
+  std::vector<std::string> order;
+  bool ok = true;
+
+  for (const auto &d : sourcesFlat) {
+    const auto it = merged.find(d.name);
+    if (it == merged.end()) {
+      merged.emplace(d.name, d);
+      order.push_back(d.name);
+      continue;
+    }
+
+    const std::string a = it->second.hasValue ? it->second.value : "1";
+    const std::string b = d.hasValue ? d.value : "1";
+    if (a != b) {
+      std::cerr << "smelt: macro '" << d.name << "' is defined as '" << a
+                << "' by " << it->second.source << " and as '" << b << "' by "
+                << d.source << "\n";
+      ok = false;
+    }
+  }
+
+  if (!ok)
+    return std::nullopt;
+
+  std::vector<std::string> out;
+  for (const auto &name : order) {
+    const Define &d = merged.at(name);
+    out.push_back(d.hasValue ? d.name + "=" + d.value : d.name);
+  }
+  return out;
 }
 
 auto Builder::compileOne(const Package &pkg, const SourceFile &src,
@@ -386,6 +470,9 @@ auto Builder::build(const NodeKey &node) -> std::optional<fs::path> {
 
   const TargetSources &src = sources_[node.first].at(node.second);
   const Usage reqs = requirementsOf(node);
+  if (!resolveDefines(reqs)) {
+    return std::nullopt;
+  }
   const fs::path dir = outDir(node);
   const fs::path objDir = dir / "obj";
 

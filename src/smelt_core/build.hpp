@@ -17,10 +17,18 @@ public:
   [[nodiscard]] auto build(const NodeKey &node)
       -> std::optional<std::filesystem::path>;
 
+  struct Define {
+    std::string name;
+    std::string value;
+    bool hasValue = false;
+    std::string source;
+    int rank = 0;
+  };
+
 private:
   struct Usage {
     std::vector<std::string> includes;
-    std::vector<std::string> defines;
+    std::vector<Define> defines;
     std::vector<std::string> options;
     std::vector<std::string> link;
   };
@@ -39,6 +47,9 @@ private:
                                  const std::filesystem::path &obj,
                                  const std::filesystem::path &dep) const
       -> std::vector<std::string>;
+  [[nodiscard]] auto resolveDefines(const Usage &u) const
+      -> std::optional<std::vector<std::string>>;
+
   [[nodiscard]] auto compileOne(const Package &pkg, const SourceFile &src,
                                 const Usage &u,
                                 const std::filesystem::path &objDir)

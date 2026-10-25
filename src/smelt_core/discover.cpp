@@ -1,6 +1,7 @@
 #include "discover.hpp"
 #include "glob.hpp"
 #include "sema.hpp"
+#include "workspace.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <map>
@@ -155,6 +156,43 @@ auto discoverSources(const Model &model,
   if (!ok)
     return std::nullopt;
   return out;
+}
+
+auto checkOwnership(const std::vector<SourceMap> &sources, const Workspace &ws,
+                    Diagnostics &diags) -> bool {
+  struct Owner {
+    std::string project;
+    std::string target;
+    fs::path projectRoot;
+  };
+  std::map<std::string, Owner> owners;
+  bool ok = true;
+
+  for (std::size_t pi = 0; pi < sources.size(); ++pi) {
+    const Package &pkg = ws.packages[pi];
+    for (const auto &[targetName, ts] : sources[pi]) {
+      const TargetInfo *t = findTarget(pkg, targetName);
+      for (const auto &file : ts.files) {
+        const std::string key = file.path.string();
+        const Owner here{pkg.model.project.name, targetName, pkg.root};
+
+        const auto it = owners.find(key);
+        if (it == owners.end()) {
+          owners.emplace(key, here);
+          continue;
+        }
+
+        const Owner &first = it->second;
+        diags.setFile(pkg.projectFile);
+        diags.error(t ? t->loc : SourceLoc{},
+                    "source file '" + file.relPath + "' belongs to both '" +
+                        first.project + ":" + first.target + "' and '" +
+                        here.project + ":" + here.target + "'");
+        ok = false;
+      }
+    }
+  }
+  return ok;
 }
 
 } // namespace smelt

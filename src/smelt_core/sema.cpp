@@ -197,6 +197,9 @@ private:
         } else if (a.key == "debug_info") {
           if (auto b = asBool(a))
             it->debugInfo = *b;
+        } else if (a.key == "defines") {
+          if (auto list = asStringList(a))
+            it->defines = std::move(*list);
         } else {
           unknownKey(a, "profile");
         }
