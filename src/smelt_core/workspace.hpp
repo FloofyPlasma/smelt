@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diagnostics.hpp"
 #include "sema.hpp"
 #include <cstddef>
 #include <deque>
@@ -29,4 +30,7 @@ struct Workspace {
 
 [[nodiscard]] auto findTarget(const Package &p, const std::string &name)
     -> const TargetInfo *;
+
+[[nodiscard]] auto loadModel(const std::filesystem::path &dir,
+                             Diagnostics &diags) -> std::optional<Model>;
 } // namespace smelt

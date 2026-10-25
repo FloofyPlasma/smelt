@@ -1,7 +1,9 @@
 #include "workspace.hpp"
 #include "ast.hpp"
 #include "diagnostics.hpp"
+#include "git.hpp"
 #include "lexer.hpp"
+#include "lock.hpp"
 #include "parser.hpp"
 #include "sema.hpp"
 #include <algorithm>
@@ -24,6 +26,28 @@ auto findTarget(const Package &p, const std::string &name)
       return &t;
   }
   return nullptr;
+}
+
+auto loadModel(const fs::path &dir, Diagnostics &diags)
+    -> std::optional<Model> {
+  const fs::path file = dir / "project.smelt";
+  diags.setFile(file.string());
+
+  std::ifstream in(file, std::ios::binary);
+  if (!in) {
+    diags.error({}, "cannot read project file");
+    return std::nullopt;
+  }
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  const std::string source = buffer.str();
+
+  Lexer lexer(source, diags);
+  const auto tokens = lexer.tokenize();
+  const ProjectFile ast = parseProject(tokens, diags);
+  if (diags.hasErrors())
+    return std::nullopt;
+  return analyze(ast, diags);
 }
 
 namespace {
@@ -56,7 +80,13 @@ public:
   std::deque<Package> packages;
 
   auto loadRoot(const fs::path &root) -> std::optional<std::size_t> {
-    return loadProject(root, fs::canonical(root));
+    rootDir_ = fs::canonical(root);
+    std::string err;
+    if (!readLock(rootDir_ / "smelt.lock", lock_, err)) {
+      diags_.error({}, err);
+      return std::nullopt;
+    }
+    return loadProject(root, rootDir_);
   }
 
 private:
@@ -126,11 +156,19 @@ private:
 
   auto loadDependency(const DependencyInfo &dep, const fs::path &parentRoot)
       -> std::optional<std::size_t> {
-    const fs::path dir = parentRoot / dep.path;
+    fs::path dir;
+    if (dep.git) {
+      if (!lockedCheckout(dep, dir))
+        return std::nullopt;
+    } else {
+      dir = parentRoot / dep.path;
+    }
+
     std::error_code ec;
     if (!fs::exists(dir / "project.smelt", ec)) {
       diags_.error(dep.loc, "dependency '" + dep.name +
-                                "': no project.smelt in '" + dep.path + "'");
+                                "': no project.smelt in '" + dir.string() +
+                                "'");
       return std::nullopt;
     }
     const fs::path canon = fs::canonical(dir);
@@ -142,6 +180,41 @@ private:
     if (const auto it = byDir_.find(canon); it != byDir_.end())
       return it->second;
     return loadProject(dir, canon);
+  }
+
+  auto lockedCheckout(const DependencyInfo &dep, fs::path &dir) -> bool {
+    const auto it = lock_.find(dep.name);
+    if (it == lock_.end()) {
+      diags_.error(dep.loc, "dependency '" + dep.name +
+                                "' is not in smelt.lock; run 'smelt fetch'");
+      return false;
+    }
+
+    const LockEntry &e = it->second;
+    const std::string kind = dep.tag ? "tag" : "commit";
+    const std::string ref = dep.tag ? *dep.tag : dep.commit.value_or("");
+    if (e.url != *dep.git || e.refKind != kind || e.ref != ref) {
+      diags_.error(dep.loc, "smelt.lock does not match project.smelt for '" +
+                                dep.name + "'; run 'smelt fetch'");
+      return false;
+    }
+
+    dir = checkoutDir(rootDir_, dep.name);
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) {
+      diags_.error(dep.loc, "checkout of '" + dep.name +
+                                "' is missing; run 'smelt fetch'");
+      return false;
+    }
+
+    const auto head = headCommit(dir);
+    if (!head || *head != e.commit) {
+      diags_.error(dep.loc,
+                   "checkout of '" + dep.name +
+                       "' is not at the locked commit; run 'smelt fetch'");
+      return false;
+    }
+    return true;
   }
 
   [[nodiscard]] auto cyclePath(const fs::path &again) const -> std::string {
@@ -242,6 +315,8 @@ private:
   }
 
   std::vector<fs::path> stack_;
+  fs::path rootDir_;
+  std::map<std::string, LockEntry> lock_;
   std::map<fs::path, std::size_t> byDir_;
   Diagnostics &diags_;
 };

@@ -27,6 +27,52 @@ auto escapesProject(const std::string &path) -> bool {
          path.find("..") != std::string::npos;
 }
 
+auto validName(const std::string &s) -> bool {
+  if (s.empty())
+    return false;
+  return std::all_of(s.begin(), s.end(), [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '-';
+  });
+}
+
+auto isFullHex(const std::string &s) -> bool {
+  return s.size() == 40 && std::all_of(s.begin(), s.end(), [](char c) {
+           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+         });
+}
+
+auto isAllowedUrl(const std::string &url) -> bool {
+  if (url.find_first_of(" \t\r\n") != std::string::npos)
+    return false;
+  if (url.rfind("https://", 0) == 0)
+    return true;
+  const char *local = std::getenv("SMELT_TEST_LOCAL_GIT");
+  return local != nullptr && std::string(local) == "1" &&
+         url.rfind("file://", 0) == 0;
+}
+
+auto dependencySourceError(const DependencyDecl &d, const DependencyInfo &info)
+    -> std::string {
+  const std::string who = "dependency '" + d.name + "'";
+  const bool hasPath = !info.path.empty();
+  const bool hasGit = info.git.has_value();
+
+  if (hasPath == hasGit)
+    return who + " needs exactly one of 'path' or 'git'";
+  if (hasPath)
+    return (info.tag || info.commit) ? who + ": 'tag' and 'commit' need 'git'"
+                                     : std::string();
+
+  if (info.tag.has_value() == info.commit.has_value())
+    return who + " needs exactly one of 'tag' or 'commit'";
+  if (info.commit && !isFullHex(*info.commit))
+    return who + ": 'commit' must be a full 40-character hash";
+  if (!isAllowedUrl(*info.git))
+    return who + ": 'git' must be an https:// URL";
+  return std::string();
+}
+
 class Checker {
 public:
   explicit Checker(Diagnostics &diags) : diags_(diags) {}
@@ -160,8 +206,8 @@ private:
   auto checkProfiles(const std::vector<ProfileDecl> &decls)
       -> std::vector<ProfileInfo> {
     std::vector<ProfileInfo> out{
-        {"debug", Optimization::None, true},
-        {"release", Optimization::Speed, false},
+        {"debug", Optimization::None, true, {}},
+        {"release", Optimization::Speed, false, {}},
     };
     std::set<std::string> seen;
 
@@ -315,8 +361,9 @@ private:
     std::set<std::string> seen;
 
     for (const auto &d : decls) {
-      if (d.name.empty() || d.name.find('.') != std::string::npos) {
-        error(d.loc, "dependency name '" + d.name + "' is not valid");
+      if (!validName(d.name)) {
+        error(d.loc, "dependency name '" + d.name +
+                         "' must use only letters, digits, '_' and '-'");
         continue;
       }
       if (!seen.insert(d.name).second) {
@@ -333,23 +380,33 @@ private:
         if (a.key == "path") {
           if (auto s = asString(a))
             info.path = *s;
+        } else if (a.key == "git") {
+          if (auto s = asString(a))
+            info.git = *s;
+        } else if (a.key == "tag") {
+          if (auto s = asString(a))
+            info.tag = *s;
+        } else if (a.key == "commit") {
+          if (auto s = asString(a))
+            info.commit = *s;
         } else if (a.key == "target") {
           if (auto s = asString(a))
             info.target = *s;
-        } else if (oneOf(a.key, {"git", "registry", "version", "tag", "commit",
-                                 "find"})) {
+        } else if (oneOf(a.key, {"registry", "version", "find"})) {
           error(a.loc, "dependency source '" + a.key +
-                           "' is not supported yet; only 'path' is supported");
+                           "' is not supported yet; use 'path' or 'git'");
         } else {
           unknownKey(a, "dependency");
         }
       }
 
-      if (info.path.empty())
-        error(d.loc, "dependency '" + d.name + "' needs a 'path'");
-      else
-        out.push_back(std::move(info));
+      if (auto msg = dependencySourceError(d, info); !msg.empty()) {
+        error(d.loc, msg);
+        continue;
+      }
+      out.push_back(std::move(info));
     }
+
     return out;
   }
 

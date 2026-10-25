@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 namespace smelt {
@@ -7,4 +8,7 @@ namespace smelt {
 
 [[nodiscard]] auto joinCommand(const std::vector<std::string> &argv)
     -> std::string;
+
+[[nodiscard]] auto runCapture(const std::vector<std::string> &argv)
+    -> std::optional<std::string>;
 } // namespace smelt

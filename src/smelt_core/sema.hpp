@@ -57,6 +57,9 @@ struct DependencyInfo {
   SourceLoc loc;
   std::string name;
   std::string path;
+  std::optional<std::string> git;
+  std::optional<std::string> tag;
+  std::optional<std::string> commit;
   std::optional<std::string> target;
 };
 

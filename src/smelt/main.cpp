@@ -1,17 +1,14 @@
 #include "build.hpp"
 #include "diagnostics.hpp"
 #include "discover.hpp"
-#include "lexer.hpp"
-#include "parser.hpp"
+#include "fetch.hpp"
 #include "process.hpp"
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -30,14 +27,16 @@ void usage() {
   std::cerr << "usage:\n"
                "  smelt build [--profile NAME] [--target NAME]\n"
                "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
-               "  smelt clean\n";
+               "  smelt clean\n"
+               "  smelt fetch\n";
 }
 
 auto parseOptions(int argc, char **argv, Options &o) -> bool {
   if (argc < 2)
     return false;
   o.command = argv[1];
-  if (o.command != "build" && o.command != "run" && o.command != "clean")
+  if (o.command != "build" && o.command != "run" && o.command != "clean" &&
+      o.command != "fetch")
     return false;
 
   for (int i = 2; i < argc; ++i) {
@@ -69,6 +68,8 @@ void printDiagnostics(const smelt::Diagnostics &diags) {
 } // namespace
 
 int main(int argc, char **argv) {
+  ::setenv("GIT_TERMINAL_PROMPT", "0", 1);
+
   Options opts;
   if (!parseOptions(argc, argv, opts)) {
     usage();
@@ -86,6 +87,15 @@ int main(int argc, char **argv) {
       return 1;
     }
     std::cout << "cleaned build/\n";
+    return 0;
+  }
+
+  if (opts.command == "fetch") {
+    smelt::Diagnostics fetchDiags("project.smelt");
+    if (!smelt::fetchDependencies(root, fetchDiags)) {
+      printDiagnostics(fetchDiags);
+      return 1;
+    }
     return 0;
   }
 
