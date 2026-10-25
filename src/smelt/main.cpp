@@ -5,6 +5,7 @@
 #include "parser.hpp"
 #include "process.hpp"
 #include "sema.hpp"
+#include "workspace.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -88,30 +89,15 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  std::ifstream in(root / projectFile, std::ios::binary);
-  if (!in) {
-    std::cerr << "smelt: no " << projectFile << " in " << root.string() << "\n";
-    return 2;
-  }
-  std::ostringstream buffer;
-  buffer << in.rdbuf();
-  const std::string source = buffer.str();
-
-  smelt::Diagnostics diags(projectFile);
-  smelt::Lexer lexer(source, diags);
-  const auto tokens = lexer.tokenize();
-  const auto file = smelt::parseProject(tokens, diags);
-
-  std::optional<smelt::Model> model;
-  if (!diags.hasErrors())
-    model = smelt::analyze(file, diags);
-  if (diags.hasErrors() || !model) {
+  smelt::Diagnostics diags("project.smelt");
+  auto ws = smelt::Workspace::load(root, diags);
+  if (!ws) {
     printDiagnostics(diags);
     return 1;
   }
 
   std::optional<smelt::ProfileInfo> profile;
-  for (const auto &p : model->profiles) {
+  for (const auto &p : ws->packages[0].model.profiles) {
     if (p.name == opts.profile)
       profile = p;
   }
@@ -120,24 +106,34 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  std::vector<std::string> warnings;
-  const auto sources = smelt::discoverSources(*model, root, diags, warnings);
-  for (const auto &w : warnings)
-    std::cerr << projectFile << ": warning: " << w << "\n";
-  if (!sources || diags.hasErrors()) {
-    printDiagnostics(diags);
-    return 1;
+  std::vector<smelt::SourceMap> sources;
+  for (const auto &pkg : ws->packages) {
+    diags.setFile(pkg.projectFile);
+    std::vector<std::string> warnings;
+    auto map = smelt::discoverSources(pkg.model, pkg.root, diags, warnings);
+    for (const auto &w : warnings)
+      std::cerr << pkg.projectFile << ": warning: " << w << "\n";
+    if (!map) {
+      printDiagnostics(diags);
+      return 1;
+    }
+    sources.push_back(std::move(*map));
   }
 
-  smelt::Builder builder(*model, *sources, root, *profile);
+  smelt::Builder builder(*ws, sources, *profile);
+  const auto &rootTargets = ws->packages[0].model.targets;
 
   if (opts.command == "build") {
     if (opts.target) {
-      if (!builder.build(*opts.target))
+      if (!smelt::findTarget(ws->packages[0], *opts.target)) {
+        std::cerr << "smelt: unknown target '" << *opts.target << "'\n";
+        return 1;
+      }
+      if (!builder.build(smelt::NodeKey{0, *opts.target}))
         return 1;
     } else {
-      for (const auto &t : model->targets) {
-        if (!builder.build(t.name))
+      for (const auto &t : rootTargets) {
+        if (!builder.build(smelt::NodeKey{0, t.name}))
           return 1;
       }
     }
@@ -149,22 +145,18 @@ int main(int argc, char **argv) {
   if (opts.target) {
     name = *opts.target;
   } else {
-    const auto exe = std::find_if(model->targets.begin(), model->targets.end(),
+    const auto exe = std::find_if(rootTargets.begin(), rootTargets.end(),
                                   [](const smelt::TargetInfo &t) {
                                     return t.type == smelt::TargetType::Exe;
                                   });
-    if (exe == model->targets.end()) {
+    if (exe == rootTargets.end()) {
       std::cerr << "smelt: no executable target in project\n";
       return 1;
     }
     name = exe->name;
   }
 
-  const smelt::TargetInfo *selected = nullptr;
-  for (const auto &t : model->targets) {
-    if (t.name == name)
-      selected = &t;
-  }
+  const smelt::TargetInfo *selected = smelt::findTarget(ws->packages[0], name);
   if (!selected) {
     std::cerr << "smelt: unknown target '" << name << "'\n";
     return 1;
@@ -174,7 +166,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  const auto exePath = builder.build(name);
+  const auto exePath = builder.build(smelt::NodeKey{0, name});
   if (!exePath)
     return 1;
 

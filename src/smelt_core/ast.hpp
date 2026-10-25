@@ -35,6 +35,12 @@ struct ProfileDecl {
   std::vector<Assign> assigns;
 };
 
+struct DependencyDecl {
+  SourceLoc loc;
+  std::string name;
+  std::vector<Assign> assigns;
+};
+
 struct TargetDecl {
   SourceLoc loc;
   std::string name;
@@ -52,5 +58,6 @@ struct ProjectFile {
   std::vector<ProjectDecl> projects;
   std::vector<ProfileDecl> profiles;
   std::vector<TargetDecl> targets;
+  std::vector<DependencyDecl> dependencies;
 };
 } // namespace smelt

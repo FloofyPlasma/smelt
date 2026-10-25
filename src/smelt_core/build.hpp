@@ -2,6 +2,7 @@
 
 #include "discover.hpp"
 #include "sema.hpp"
+#include "workspace.hpp"
 #include <filesystem>
 #include <optional>
 #include <set>
@@ -10,50 +11,53 @@
 namespace smelt {
 class Builder {
 public:
-  Builder(const Model &model, const SourceMap &sources,
-          std::filesystem::path projectRoot, ProfileInfo profile);
+  Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
+          ProfileInfo profile);
 
-  [[nodiscard]] auto build(const std::string &name)
+  [[nodiscard]] auto build(const NodeKey &node)
       -> std::optional<std::filesystem::path>;
 
 private:
-  [[nodiscard]] auto find(const std::string &name) const -> const TargetInfo *;
-  [[nodiscard]] auto targetDir(const std::string &name) const
-      -> std::filesystem::path;
+  struct Usage {
+    std::vector<std::string> includes;
+    std::vector<std::string> defines;
+    std::vector<std::string> options;
+    std::vector<std::string> link;
+  };
 
-  [[nodiscard]] auto includeDirs(const TargetInfo &t,
-                                 const TargetSources &src) const
-      -> std::vector<std::string>;
-  void collectPublicIncludes(const std::string &name,
-                             std::set<std::string> &visited,
-                             std::vector<std::string> &out) const;
-  void collectLibs(const std::string &name, std::set<std::string> &seen,
-                   std::vector<std::string> &post) const;
+  [[nodiscard]] auto target(const NodeKey &n) const -> const TargetInfo &;
+  [[nodiscard]] auto depsOf(const NodeKey &n) const -> std::vector<NodeKey>;
+  [[nodiscard]] auto outDir(const NodeKey &n) const -> std::filesystem::path;
+  void addPublic(const NodeKey &n, Usage &u) const;
+  void walkDeps(const NodeKey &n, std::set<NodeKey> &seen, Usage &u) const;
+  [[nodiscard]] auto requirementsOf(const NodeKey &n) const -> Usage;
+  void staticLibs(const NodeKey &n, std::set<NodeKey> &seen,
+                  std::vector<NodeKey> &post) const;
 
-  [[nodiscard]] auto stdFlag(bool cxx) const -> std::string;
-  [[nodiscard]] auto compileArgs(const TargetInfo &t, const SourceFile &src,
-                                 const std::vector<std::string> &includes,
+  [[nodiscard]] auto compileArgs(const Package &pkg, const SourceFile &src,
+                                 const Usage &u,
                                  const std::filesystem::path &obj,
                                  const std::filesystem::path &dep) const
       -> std::vector<std::string>;
-
-  [[nodiscard]] auto compileOne(const TargetInfo &t, const SourceFile &src,
-                                const std::vector<std::string> &includes,
-                                const std::filesystem::path &objDir) const
+  [[nodiscard]] auto compileOne(const Package &pkg, const SourceFile &src,
+                                const Usage &u,
+                                const std::filesystem::path &objDir)
       -> std::optional<std::filesystem::path>;
-  [[nodiscard]] auto archive(const TargetInfo &t,
-                             const std::vector<std::filesystem::path> &obects)
+  [[nodiscard]] auto archive(const std::string &name,
+                             const std::filesystem::path &dir,
+                             const std::vector<std::filesystem::path> &objects)
       -> std::optional<std::filesystem::path>;
-  [[nodiscard]] auto link(const TargetInfo &t,
+  [[nodiscard]] auto link(const std::string &name,
+                          const std::filesystem::path &dir,
                           const std::vector<std::filesystem::path> &objects,
                           const std::vector<std::filesystem::path> &archives,
                           const std::vector<std::string> &flags)
       -> std::optional<std::filesystem::path>;
 
-  const Model &model_;
-  const SourceMap &sources_;
-  std::filesystem::path root_;
+  const Workspace &ws_;
+  const std::vector<SourceMap> &sources_;
   ProfileInfo profile_;
-  std::map<std::string, std::filesystem::path> outputs_;
+  std::map<NodeKey, std::filesystem::path> outputs_;
+  std::set<NodeKey> active_;
 };
 } // namespace smelt

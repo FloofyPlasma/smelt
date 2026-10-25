@@ -21,6 +21,7 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/glob.cpp" \
   "$ROOT/src/smelt_core/process.cpp" \
   "$ROOT/src/smelt_core/discover.cpp" \
+  "$ROOT/src/smelt_core/workspace.cpp" \
   "$ROOT/src/smelt_core/build.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -o "$OUT/smelt"

@@ -37,6 +37,9 @@ public:
           file.targets.push_back(std::move(*t));
         break;
       case TokenKind::KwDependency:
+        if (auto d = parseDependencyDecl())
+          file.dependencies.push_back(std::move(*d));
+        break;
       case TokenKind::KwSource:
         diags_.error(peek().loc, std::string(tokenKindName(peek().kind)) +
                                      " is not allowed in project.smelt");
@@ -176,6 +179,22 @@ private:
     }
 
     if (!expect(TokenKind::RBrace, "'}'"))
+      return std::nullopt;
+    return decl;
+  }
+
+  auto parseDependencyDecl() -> std::optional<DependencyDecl> {
+    DependencyDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted dependency name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!parseAssignBlock(decl.assigns))
       return std::nullopt;
     return decl;
   }

@@ -36,6 +36,8 @@ public:
                        d.message);
   }
 
+  void setFile(std::string file) { file_ = std::move(file); }
+
 private:
   std::string file_;
   std::vector<Diagnostic> items_;

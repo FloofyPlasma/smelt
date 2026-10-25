@@ -2,6 +2,8 @@
 #include "discover.hpp"
 #include "process.hpp"
 #include "sema.hpp"
+#include "workspace.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -121,84 +123,104 @@ void writeSignature(const fs::path &sig, const std::string &sigText) {
   std::ofstream out(sig, std::ios::binary);
   out << sigText;
 }
-} // namespace
 
-Builder::Builder(const Model &model, const SourceMap &sources,
-                 fs::path projectRoot, ProfileInfo profile)
-    : model_(model), sources_(sources), root_(std::move(projectRoot)),
-      profile_(std::move(profile)) {}
-
-auto Builder::find(const std::string &name) const -> const TargetInfo * {
-  for (const auto &t : model_.targets) {
-    if (t.name == name)
-      return &t;
+void dedupe(std::vector<std::string> &v) {
+  std::set<std::string> seen;
+  std::vector<std::string> out;
+  for (auto &s : v) {
+    if (seen.insert(s).second)
+      out.push_back(s);
   }
-  return nullptr;
+  v = std::move(out);
 }
 
-auto Builder::targetDir(const std::string &name) const -> fs::path {
-  return root_ / "build" / profile_.name / name;
-}
-
-auto Builder::stdFlag(const bool cxx) const -> std::string {
+auto stdFlag(const ProjectInfo &pr, const bool cxx) -> std::string {
   if (cxx) {
-    const int s = model_.project.cxxStd.value_or(20);
+    const int s = pr.cxxStd.value_or(20);
     return "-std=c++" + std::to_string(s);
   }
-  const int s = model_.project.cStd.value_or(17);
+  const int s = pr.cStd.value_or(17);
   return "-std=c" + std::to_string(s);
 }
+} // namespace
 
-void Builder::collectPublicIncludes(const std::string &name,
-                                    std::set<std::string> &visited,
-                                    std::vector<std::string> &out) const {
-  if (!visited.insert(name).second)
-    return;
-  const TargetInfo *t = find(name);
-  if (!t)
-    return;
-  for (const auto &dir : t->publicIncludes)
-    out.push_back((root_ / dir).string());
-  for (const auto &dep : t->depends)
-    collectPublicIncludes(dep.name, visited, out);
+Builder::Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
+                 ProfileInfo profile)
+    : ws_(ws), sources_(sources), profile_(std::move(profile)) {}
+
+auto Builder::target(const NodeKey &n) const -> const TargetInfo & {
+  return *findTarget(ws_.packages[n.first], n.second);
 }
 
-auto Builder::includeDirs(const TargetInfo &t, const TargetSources &src) const
-    -> std::vector<std::string> {
-  std::vector<std::string> dirs{src.root.string()};
-  for (const auto &d : t.privateIncludes)
-    dirs.push_back((root_ / d).string());
+auto Builder::depsOf(const NodeKey &n) const -> std::vector<NodeKey> {
+  const Package &p = ws_.packages[n.first];
+  std::vector<NodeKey> out;
+  for (const auto &dep : target(n).depends)
+    out.push_back(p.resolved.at(dep.name));
+  return out;
+}
+
+auto Builder::outDir(const NodeKey &n) const -> fs::path {
+  const fs::path base = ws_.packages[0].root / "build" / profile_.name;
+  if (n.first == 0)
+    return base / n.second;
+  return base / "deps" / ws_.packages[n.first].model.project.name / n.second;
+}
+
+void Builder::addPublic(const NodeKey &n, Usage &u) const {
+  const Package &p = ws_.packages[n.first];
+  const TargetInfo &t = target(n);
   for (const auto &d : t.publicIncludes)
-    dirs.push_back((root_ / d).string());
+    u.includes.push_back((p.root / d).string());
+  u.defines.insert(u.defines.end(), t.defines.begin(), t.defines.end());
+  u.options.insert(u.options.end(), t.compileOptions.begin(),
+                   t.compileOptions.end());
+  u.link.insert(u.link.end(), t.link.begin(), t.link.end());
+}
 
-  std::set<std::string> visited{t.name};
-  for (const auto &dep : t.depends)
-    collectPublicIncludes(dep.name, visited, dirs);
-
-  std::vector<std::string> unique;
-  for (const auto &d : dirs) {
-    if (std::find(unique.begin(), unique.end(), d) == unique.end())
-      unique.push_back(d);
+void Builder::walkDeps(const NodeKey &n, std::set<NodeKey> &seen,
+                       Usage &u) const {
+  for (const auto &d : depsOf(n)) {
+    if (seen.insert(d).second) {
+      addPublic(d, u);
+      walkDeps(d, seen, u);
+    }
   }
-  return unique;
 }
 
-void Builder::collectLibs(const std::string &name, std::set<std::string> &seen,
-                          std::vector<std::string> &post) const {
-  if (!seen.insert(name).second)
-    return;
-  const TargetInfo *t = find(name);
-  if (!t)
-    return;
-  for (const auto &dep : t->depends)
-    collectLibs(dep.name, seen, post);
-  if (t->type == TargetType::StaticLib)
-    post.push_back(name);
+auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
+  const Package &p = ws_.packages[n.first];
+  const TargetInfo &t = target(n);
+
+  Usage u;
+  u.includes.push_back(sources_[n.first].at(n.second).root.string());
+  for (const auto &d : t.privateIncludes)
+    u.includes.push_back((p.root / d).string());
+
+  addPublic(n, u);
+  std::set<NodeKey> seen{n};
+  walkDeps(n, seen, u);
+
+  dedupe(u.includes);
+  dedupe(u.defines);
+  dedupe(u.options);
+  dedupe(u.link);
+  return u;
 }
 
-auto Builder::compileArgs(const TargetInfo &t, const SourceFile &src,
-                          const std::vector<std::string> &includes,
-                          const std::filesystem::path &obj,
+void Builder::staticLibs(const NodeKey &n, std::set<NodeKey> &seen,
+                         std::vector<NodeKey> &post) const {
+  for (const auto &d : depsOf(n)) {
+    if (seen.insert(d).second) {
+      staticLibs(d, seen, post);
+      if (target(d).type == TargetType::StaticLib)
+        post.push_back(d);
+    }
+  }
+}
+
+auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
+                          const Usage &u, const std::filesystem::path &obj,
                           const std::filesystem::path &dep) const
     -> std::vector<std::string> {
   std::vector<std::string> args{
@@ -210,7 +232,7 @@ auto Builder::compileArgs(const TargetInfo &t, const SourceFile &src,
       "-MMD",
       "-MF",
       dep.string(),
-      stdFlag(src.isCxx),
+      stdFlag(pkg.model.project, src.isCxx),
   };
 
   switch (profile_.optimization) {
@@ -227,24 +249,23 @@ auto Builder::compileArgs(const TargetInfo &t, const SourceFile &src,
   if (profile_.debugInfo)
     args.push_back("-g");
 
-  for (const auto &d : t.defines)
+  for (const auto &d : u.defines)
     args.push_back("-D" + d);
-  args.insert(args.end(), t.compileOptions.begin(), t.compileOptions.end());
-  for (const auto &i : includes)
+  args.insert(args.end(), u.options.begin(), u.options.end());
+  for (const auto &i : u.includes)
     args.push_back("-I" + i);
 
   return args;
 }
 
-auto Builder::compileOne(const TargetInfo &t, const SourceFile &src,
-                         const std::vector<std::string> &includes,
-                         const std::filesystem::path &objDir) const
+auto Builder::compileOne(const Package &pkg, const SourceFile &src,
+                         const Usage &u, const std::filesystem::path &objDir)
     -> std::optional<fs::path> {
   const fs::path obj = objDir / (src.relPath + ".o");
   const fs::path dep = fs::path(obj.string() + ".d");
   const fs::path sig = fs::path(obj.string() + ".sig");
 
-  const auto args = compileArgs(t, src, includes, obj, dep);
+  const auto args = compileArgs(pkg, src, u, obj, dep);
   const std::string sigText = signatureOf(args);
 
   const auto deps = readDepFile(dep);
@@ -260,7 +281,8 @@ auto Builder::compileOne(const TargetInfo &t, const SourceFile &src,
   fs::create_directories(obj.parent_path());
   fs::remove(sig);
 
-  std::cout << "  " << (src.isCxx ? "CXX " : "CC  ") << src.relPath << "\n";
+  std::cout << "  " << (src.isCxx ? "CXX " : "CC  ") << pkg.model.project.name
+            << "/" << src.relPath << "\n";
   if (runProcess(args) != 0) {
     std::cerr << "smelt: compile failed: " << joinCommand(args) << "\n";
     return std::nullopt;
@@ -270,11 +292,10 @@ auto Builder::compileOne(const TargetInfo &t, const SourceFile &src,
   return obj;
 }
 
-auto Builder::archive(const TargetInfo &t,
-                      const std::vector<std::filesystem::path> &objects)
+auto Builder::archive(const std::string &name, const fs::path &dir,
+                      const std::vector<fs::path> &objects)
     -> std::optional<fs::path> {
-  const fs::path dir = targetDir(t.name);
-  const fs::path out = dir / ("lib" + t.name + ".a");
+  const fs::path out = dir / ("lib" + name + ".a");
   const fs::path sig = fs::path(out.string() + ".sig");
 
   std::vector<std::string> args{"ar", "rcs", out.string()};
@@ -289,7 +310,7 @@ auto Builder::archive(const TargetInfo &t,
   fs::remove(out);
   fs::remove(sig);
 
-  std::cout << "  AR  lib" << t.name << ".a\n";
+  std::cout << "  AR  lib" << name << ".a\n";
   if (runProcess(args) != 0) {
     std::cerr << "smelt: archive failed: " << joinCommand(args) << "\n";
     return std::nullopt;
@@ -299,12 +320,12 @@ auto Builder::archive(const TargetInfo &t,
   return out;
 }
 
-auto Builder::link(const TargetInfo &t, const std::vector<fs::path> &objects,
+auto Builder::link(const std::string &name, const fs::path &dir,
+                   const std::vector<fs::path> &objects,
                    const std::vector<fs::path> &archives,
                    const std::vector<std::string> &flags)
     -> std::optional<fs::path> {
-  const fs::path dir = targetDir(t.name);
-  const fs::path out = dir / t.name;
+  const fs::path out = dir / name;
   const fs::path sig = fs::path(out.string() + ".sig");
 
   std::vector<std::string> args{"clang++"};
@@ -319,7 +340,7 @@ auto Builder::link(const TargetInfo &t, const std::vector<fs::path> &objects,
   args.insert(args.end(), flags.begin(), flags.end());
 
   std::vector<fs::path> inputs = objects;
-  inputs.insert(inputs.end(), flags.begin(), flags.end());
+  inputs.insert(inputs.end(), archives.begin(), archives.end());
 
   const std::string sigText = signatureOf(args);
   if (!isStale(out, sig, sigText, inputs))
@@ -329,7 +350,7 @@ auto Builder::link(const TargetInfo &t, const std::vector<fs::path> &objects,
   fs::remove(out);
   fs::remove(sig);
 
-  std::cout << "  LD  " << t.name << "\n";
+  std::cout << "  LD  " << name << "\n";
   if (runProcess(args) != 0) {
     std::cerr << "smelt: link failed: " << joinCommand(args) << "\n";
     return std::nullopt;
@@ -339,68 +360,66 @@ auto Builder::link(const TargetInfo &t, const std::vector<fs::path> &objects,
   return out;
 }
 
-auto Builder::build(const std::string &name) -> std::optional<fs::path> {
-  if (const auto it = outputs_.find(name); it != outputs_.end())
+auto Builder::build(const NodeKey &node) -> std::optional<fs::path> {
+  if (const auto it = outputs_.find(node); it != outputs_.end())
     return it->second;
 
-  const TargetInfo *t = find(name);
-  if (!t) {
-    std::cerr << "smelt: unknown target '" << name << "'\n";
+  if (!active_.insert(node).second) {
+    std::cerr << "smelt: internal error: cycle through target '" << node.second
+              << "'\n";
     return std::nullopt;
   }
 
-  for (const auto &dep : t->depends) {
-    const TargetInfo *d = find(dep.name);
-    if (d && d->type == TargetType::Exe) {
-      std::cerr << "smelt: target '" << name << "' depends on exe '" << dep.name
+  const Package &pkg = ws_.packages[node.first];
+  const TargetInfo &t = target(node);
+
+  for (const auto &dep : depsOf(node)) {
+    if (target(dep).type == TargetType::Exe) {
+      std::cerr << "smelt: target '" << t.name << "' depends on exe '"
+                << dep.second
                 << "'; only static_lib targets can be dependencies\n";
       return std::nullopt;
     }
-    if (!build(dep.name))
+    if (!build(dep))
       return std::nullopt;
   }
 
-  const auto srcIt = sources_.find(name);
-  if (srcIt == sources_.end()) {
-    std::cerr << "smelt: no sources for target '" << name << "'\n";
-    return std::nullopt;
-  }
-  const TargetSources &src = srcIt->second;
-
-  const fs::path objDir = targetDir(name) / "obj";
-  const auto includes = includeDirs(*t, src);
+  const TargetSources &src = sources_[node.first].at(node.second);
+  const Usage reqs = requirementsOf(node);
+  const fs::path dir = outDir(node);
+  const fs::path objDir = dir / "obj";
 
   std::vector<fs::path> objects;
   for (const auto &file : src.files) {
-    const auto obj = compileOne(*t, file, includes, objDir);
+    const auto obj = compileOne(pkg, file, reqs, objDir);
     if (!obj)
       return std::nullopt;
     objects.push_back(*obj);
   }
 
   std::optional<fs::path> out;
-  if (t->type == TargetType::StaticLib) {
-    out = archive(*t, objects);
+  if (t.type == TargetType::StaticLib) {
+    out = archive(t.name, dir, objects);
   } else {
-    std::vector<std::string> libs;
-    std::set<std::string> seen{name};
-    for (const auto &dep : t->depends)
-      collectLibs(dep.name, seen, libs);
+    std::set<NodeKey> seen{node};
+    std::vector<NodeKey> libs;
+    staticLibs(node, seen, libs);
     std::reverse(libs.begin(), libs.end());
 
     std::vector<fs::path> archives;
-    std::vector<std::string> flags = t->link;
     for (const auto &lib : libs) {
-      archives.push_back(outputs_.at(lib));
-      const TargetInfo *lt = find(lib);
-      flags.insert(flags.end(), lt->link.begin(), lt->link.end());
+      const auto a = build(lib);
+      if (!a)
+        return std::nullopt;
+      archives.push_back(*a);
     }
-    out = link(*t, objects, archives, flags);
+    out = link(t.name, dir, objects, archives, reqs.link);
   }
 
   if (!out)
     return std::nullopt;
-  outputs_[name] = *out;
+  outputs_[node] = *out;
+  active_.erase(node);
   return out;
 }
 

@@ -2,9 +2,11 @@
 #include "ast.hpp"
 #include "diagnostics.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -37,8 +39,9 @@ public:
 
     m.project = checkProject(file.projects.front());
     m.profiles = checkProfiles(file.profiles);
+    m.dependencies = checkDependencyDecls(file.dependencies);
     m.targets = checkTargets(file.targets);
-    checkDependencies(m.targets);
+    checkDependencies(m.targets, m.dependencies);
 
     if (diags_.hasErrors())
       return std::nullopt;
@@ -299,14 +302,52 @@ private:
         error(item.loc, "items in 'depends' must be quoted strings");
         continue;
       }
-      if (item.text.find('.') != std::string::npos) {
-        error(item.loc, "dotted dependency '" + item.text +
-                            "' needs a dependency block, which this version "
-                            "does not support yet");
-        continue;
-      }
       t.depends.push_back({item.loc, item.text});
     }
+  }
+
+  auto checkDependencyDecls(const std::vector<DependencyDecl> &decls)
+      -> std::vector<DependencyInfo> {
+    std::vector<DependencyInfo> out;
+    std::set<std::string> seen;
+
+    for (const auto &d : decls) {
+      if (d.name.empty() || d.name.find('.') != std::string::npos) {
+        error(d.loc, "dependency name '" + d.name + "' is not valid");
+        continue;
+      }
+      if (!seen.insert(d.name).second) {
+        error(d.loc, "dependency '" + d.name + "' is declared twice");
+        continue;
+      }
+
+      DependencyInfo info;
+      info.loc = d.loc;
+      info.name = d.name;
+      checkDuplicates(d.assigns);
+
+      for (const auto &a : d.assigns) {
+        if (a.key == "path") {
+          if (auto s = asString(a))
+            info.path = *s;
+        } else if (a.key == "target") {
+          if (auto s = asString(a))
+            info.target = *s;
+        } else if (oneOf(a.key, {"git", "registry", "version", "tag", "commit",
+                                 "find"})) {
+          error(a.loc, "dependency source '" + a.key +
+                           "' is not supported yet; only 'path' is supported");
+        } else {
+          unknownKey(a, "dependency");
+        }
+      }
+
+      if (info.path.empty())
+        error(d.loc, "dependency '" + d.name + "' needs a 'path'");
+      else
+        out.push_back(std::move(info));
+    }
+    return out;
   }
 
   void checkPlatformBlock(const OnBlock &block, TargetInfo &t) {
@@ -336,15 +377,33 @@ private:
     t.platforms[block.platform] = std::move(rules);
   }
 
-  void checkDependencies(const std::vector<TargetInfo> &targets) {
+  void checkDependencies(const std::vector<TargetInfo> &targets,
+                         const std::vector<DependencyInfo> &deps) {
     std::map<std::string, const TargetInfo *> byName;
     for (const auto &t : targets)
       byName[t.name] = &t;
 
+    std::set<std::string> depNames;
+    for (const auto &d : deps)
+      depNames.insert(d.name);
+
     for (const auto &t : targets) {
+      if (depNames.count(t.name))
+        error(t.loc, "'" + t.name + "' is both a target and a dependency");
+
       for (const auto &dep : t.depends) {
-        if (!byName.count(dep.name))
-          error(dep.loc, "unknown target '" + dep.name + "' in depends");
+        const std::size_t dot = dep.name.find('.');
+        if (dot == std::string::npos) {
+          if (!byName.count(dep.name) && !depNames.count(dep.name))
+            error(dep.loc, "unknown target '" + dep.name + "' in depends");
+          continue;
+        }
+        const std::string alias = dep.name.substr(0, dot);
+        const std::string rest = dep.name.substr(dot + 1);
+        if (!depNames.count(alias))
+          error(dep.loc, "unknown dependency '" + alias + "' in depends");
+        else if (rest.empty() || rest.find('.') != std::string::npos)
+          error(dep.loc, "'" + dep.name + "' is not a valid target reference");
       }
     }
 

@@ -52,9 +52,17 @@ struct TargetInfo {
   std::map<std::string, PlatformRules> platforms;
 };
 
+struct DependencyInfo {
+  SourceLoc loc;
+  std::string name;
+  std::string path;
+  std::optional<std::string> target;
+};
+
 struct Model {
   ProjectInfo project;
   std::vector<ProfileInfo> profiles;
+  std::vector<DependencyInfo> dependencies;
   std::vector<TargetInfo> targets;
 };
 
