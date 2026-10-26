@@ -20,4 +20,8 @@ namespace smelt {
 
 [[nodiscard]] auto checkoutCommit(const std::filesystem::path &dir,
                                   const std::string &commit) -> bool;
+
+[[nodiscard]] auto isAllowedGitUrl(const std::string &url) -> bool;
+
+[[nodiscard]] auto isFullCommitHash(const std::string &s) -> bool;
 } // namespace smelt

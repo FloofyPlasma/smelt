@@ -1,6 +1,7 @@
 #include "sema.hpp"
 #include "ast.hpp"
 #include "diagnostics.hpp"
+#include "git.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -36,41 +37,43 @@ auto validName(const std::string &s) -> bool {
   });
 }
 
-auto isFullHex(const std::string &s) -> bool {
-  return s.size() == 40 && std::all_of(s.begin(), s.end(), [](char c) {
-           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-         });
-}
+auto dependencySourceError(const DependencyInfo &info) -> std::string {
+  const std::string who = "dependency '" + info.name + "'";
+  const int sources = int(!info.path.empty()) + int(info.git.has_value()) +
+                      int(info.registry.has_value());
 
-auto isAllowedUrl(const std::string &url) -> bool {
-  if (url.find_first_of(" \t\r\n") != std::string::npos)
-    return false;
-  if (url.rfind("https://", 0) == 0)
-    return true;
-  const char *local = std::getenv("SMELT_TEST_LOCAL_GIT");
-  return local != nullptr && std::string(local) == "1" &&
-         url.rfind("file://", 0) == 0;
-}
+  if (sources != 1)
+    return who + " needs exactly one of 'path', 'git', or 'registry'";
 
-auto dependencySourceError(const DependencyDecl &d, const DependencyInfo &info)
-    -> std::string {
-  const std::string who = "dependency '" + d.name + "'";
-  const bool hasPath = !info.path.empty();
-  const bool hasGit = info.git.has_value();
+  if (info.registry) {
+    if (!validName(*info.registry))
+      return who + ": 'registry' name is not valid";
+    if (!info.version)
+      return who + " needs a 'version' with 'registry'";
+    if (info.tag || info.commit)
+      return who + ": 'tag' and 'commit' are not allowed with 'registry'";
+    const std::string &v = *info.version;
+    if (v.empty() || v[0] == '.' || v.find('/') != std::string::npos)
+      return who + ": 'version' must be a single directory name";
+    return {};
+  }
 
-  if (hasPath == hasGit)
-    return who + " needs exactly one of 'path' or 'git'";
-  if (hasPath)
-    return (info.tag || info.commit) ? who + ": 'tag' and 'commit' need 'git'"
-                                     : std::string();
+  if (info.version)
+    return who + ": 'version' needs 'registry'";
+
+  if (!info.path.empty()) {
+    if (info.tag || info.commit)
+      return who + ": 'tag' and 'commit' need 'git'";
+    return {};
+  }
 
   if (info.tag.has_value() == info.commit.has_value())
     return who + " needs exactly one of 'tag' or 'commit'";
-  if (info.commit && !isFullHex(*info.commit))
-    return who + ": 'commit' must be a full 40-character hash";
-  if (!isAllowedUrl(*info.git))
+  if (info.commit && !isFullCommitHash(*info.commit))
+    return who + ": 'commit must be a full 40-character hash";
+  if (!isAllowedGitUrl(*info.git))
     return who + ": 'git' must be an https:// URL";
-  return std::string();
+  return {};
 }
 
 class Checker {
@@ -389,18 +392,24 @@ private:
         } else if (a.key == "commit") {
           if (auto s = asString(a))
             info.commit = *s;
+        } else if (a.key == "registry") {
+          if (auto s = asString(a))
+            info.registry = *s;
+        } else if (a.key == "version") {
+          if (auto s = asString(a))
+            info.version = *s;
         } else if (a.key == "target") {
           if (auto s = asString(a))
             info.target = *s;
-        } else if (oneOf(a.key, {"registry", "version", "find"})) {
-          error(a.loc, "dependency source '" + a.key +
-                           "' is not supported yet; use 'path' or 'git'");
+        } else if (a.key == "find") {
+          error(a.loc, "dependency source 'find' is not supported yet; use "
+                       "'path', 'git' or 'registry'");
         } else {
           unknownKey(a, "dependency");
         }
       }
 
-      if (auto msg = dependencySourceError(d, info); !msg.empty()) {
+      if (auto msg = dependencySourceError(info); !msg.empty()) {
         error(d.loc, msg);
         continue;
       }

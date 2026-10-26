@@ -60,6 +60,8 @@ struct DependencyInfo {
   std::optional<std::string> git;
   std::optional<std::string> tag;
   std::optional<std::string> commit;
+  std::optional<std::string> registry;
+  std::optional<std::string> version;
   std::optional<std::string> target;
 };
 

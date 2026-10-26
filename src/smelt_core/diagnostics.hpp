@@ -25,6 +25,7 @@ public:
     items_.push_back(
         {.file = file_, .loc = loc, .message = std::move(message)});
   }
+  void add(const Diagnostic &d) { items_.push_back(d); }
 
   [[nodiscard]] auto hasErrors() const -> bool { return !items_.empty(); }
   [[nodiscard]] auto items() const -> const std::vector<Diagnostic> & {

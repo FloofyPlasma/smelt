@@ -1,20 +1,15 @@
 #include "workspace.hpp"
 #include "ast.hpp"
-#include "diagnostics.hpp"
 #include "git.hpp"
 #include "lexer.hpp"
 #include "lock.hpp"
 #include "parser.hpp"
+#include "registry.hpp"
 #include "sema.hpp"
-#include <algorithm>
-#include <cstddef>
-#include <deque>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <sstream>
-#include <system_error>
-#include <vector>
+#include <string>
 
 namespace fs = std::filesystem;
 
@@ -28,14 +23,13 @@ auto findTarget(const Package &p, const std::string &name)
   return nullptr;
 }
 
-auto loadModel(const fs::path &dir, Diagnostics &diags)
+auto loadModel(const fs::path &file, Diagnostics &diags)
     -> std::optional<Model> {
-  const fs::path file = dir / "project.smelt";
   diags.setFile(file.string());
 
   std::ifstream in(file, std::ios::binary);
   if (!in) {
-    diags.error({}, "cannot read project file");
+    diags.error({}, "cannot read " + file.string());
     return std::nullopt;
   }
   std::ostringstream buffer;
@@ -86,34 +80,16 @@ public:
       diags_.error({}, err);
       return std::nullopt;
     }
-    return loadProject(root, rootDir_);
+    return loadProject(rootDir_ / "project.smelt", rootDir_);
   }
 
 private:
-  auto loadProject(const fs::path &dir, const fs::path &canon)
+  auto loadProject(const fs::path &file, const fs::path &root)
       -> std::optional<std::size_t> {
-    StackGuard guard(stack_, canon);
-
-    const fs::path file = dir / "project.smelt";
+    StackGuard guard(stack_, root);
     const std::string display = file.string();
-    diags_.setFile(display);
 
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-      diags_.error({}, "cannot read project file");
-      return std::nullopt;
-    }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    const std::string source = buffer.str();
-
-    Lexer lexer(source, diags_);
-    const auto tokens = lexer.tokenize();
-    const ProjectFile ast = parseProject(tokens, diags_);
-    if (diags_.hasErrors())
-      return std::nullopt;
-
-    auto model = analyze(ast, diags_);
+    auto model = loadModel(file, diags_);
     if (!model)
       return std::nullopt;
 
@@ -128,17 +104,17 @@ private:
 
     Package pkg;
     pkg.projectFile = display;
-    pkg.root = canon;
+    pkg.root = root;
     pkg.model = std::move(*model);
     packages.push_back(std::move(pkg));
     const std::size_t index = packages.size() - 1;
-    byDir_[canon] = index;
+    byDir_[root] = index;
 
     const std::vector<DependencyInfo> decls =
         packages[index].model.dependencies;
     for (const auto &dep : decls) {
       diags_.setFile(display);
-      const auto child = loadDependency(dep, canon);
+      const auto child = loadDependency(dep, root);
       if (!child)
         return std::nullopt;
       packages[index].deps[dep.name] = *child;
@@ -156,35 +132,41 @@ private:
 
   auto loadDependency(const DependencyInfo &dep, const fs::path &parentRoot)
       -> std::optional<std::size_t> {
-    fs::path dir;
-    if (dep.git) {
-      if (!lockedCheckout(dep, dir))
-        return std::nullopt;
-    } else {
-      dir = parentRoot / dep.path;
-    }
-
+    fs::path file;
+    fs::path root;
     std::error_code ec;
-    if (!fs::exists(dir / "project.smelt", ec)) {
-      diags_.error(dep.loc, "dependency '" + dep.name +
-                                "': no project.smelt in '" + dir.string() +
-                                "'");
-      return std::nullopt;
-    }
-    const fs::path canon = fs::canonical(dir);
 
-    if (std::find(stack_.begin(), stack_.end(), canon) != stack_.end()) {
-      diags_.error(dep.loc, "dependency cycle: " + cyclePath(canon));
+    if (dep.registry) {
+      if (!lockedRegistry(dep, file, root))
+        return std::nullopt;
+    } else if (dep.git) {
+      if (!lockedCheckout(dep, root))
+        return std::nullopt;
+      file = root / "project.smelt";
+    } else {
+      const fs::path dir = parentRoot / dep.path;
+      if (!fs::exists(dir / "project.smelt", ec)) {
+        diags_.error(dep.loc, "dependency '" + dep.name +
+                                  "': no project.smelt in '" + dir.string() +
+                                  "'");
+        return std::nullopt;
+      }
+      root = fs::canonical(dir);
+      file = root / "project.smelt";
+    }
+
+    if (std::find(stack_.begin(), stack_.end(), root) != stack_.end()) {
+      diags_.error(dep.loc, "dependency cycle: " + cyclePath(root));
       return std::nullopt;
     }
-    if (const auto it = byDir_.find(canon); it != byDir_.end())
+    if (const auto it = byDir_.find(root); it != byDir_.end())
       return it->second;
-    return loadProject(dir, canon);
+    return loadProject(file, root);
   }
 
-  auto lockedCheckout(const DependencyInfo &dep, fs::path &dir) -> bool {
-    const auto it = lock_.find(dep.name);
-    if (it == lock_.end()) {
+  auto lockedCheckout(const DependencyInfo &dep, fs::path &root) -> bool {
+    const auto it = lock_.entries.find(dep.name);
+    if (it == lock_.entries.end()) {
       diags_.error(dep.loc, "dependency '" + dep.name +
                                 "' is not in smelt.lock; run 'smelt fetch'");
       return false;
@@ -193,44 +175,72 @@ private:
     const LockEntry &e = it->second;
     const std::string kind = dep.tag ? "tag" : "commit";
     const std::string ref = dep.tag ? *dep.tag : dep.commit.value_or("");
-    if (e.url != *dep.git || e.refKind != kind || e.ref != ref) {
+    if (e.kind != "git" || e.url != *dep.git || e.refKind != kind ||
+        e.ref != ref) {
+      diags_.error(dep.loc, "smelt.lock does not match project.smelt for '" +
+                                dep.name + "'; run 'smelt fetch'");
+      return false;
+    }
+    return checkedAt(dep, checkoutDir(rootDir_, dep.name), e.commit, root);
+  }
+
+  auto lockedRegistry(const DependencyInfo &dep, fs::path &file, fs::path &root)
+      -> bool {
+    const auto it = lock_.entries.find(dep.name);
+    if (it == lock_.entries.end()) {
+      diags_.error(dep.loc, "dependency '" + dep.name +
+                                "' is not in smelt.lock; run 'smelt fetch'");
+      return false;
+    }
+
+    const LockEntry &e = it->second;
+    if (e.kind != "registry" || e.ref != *dep.version) {
       diags_.error(dep.loc, "smelt.lock does not match project.smelt for '" +
                                 dep.name + "'; run 'smelt fetch'");
       return false;
     }
 
-    dir = checkoutDir(rootDir_, dep.name);
+    const fs::path reg = registryDir(rootDir_);
     std::error_code ec;
-    if (!fs::exists(dir, ec)) {
+    if (!fs::exists(reg, ec) || headCommit(reg) != lock_.registryCommit) {
+      diags_.error(dep.loc, "registry checkout is missing or not at the "
+                            "locked commit; run 'smelt fetch'");
+      return false;
+    }
+
+    const auto entry = readRegistryEntry(reg, dep.name, *dep.version, diags_);
+    if (!entry)
+      return false;
+    if (entry->upstreamUrl != e.url || entry->upstreamCommit != e.commit) {
+      diags_.error(dep.loc, "registry entry for '" + dep.name +
+                                "' changed since smelt.lock was written; run "
+                                "'smelt fetch'");
+      return false;
+    }
+
+    if (!checkedAt(dep, checkoutDir(rootDir_, dep.name), e.commit, root))
+      return false;
+    file = entry->overlayFile;
+    return true;
+  }
+
+  auto checkedAt(const DependencyInfo &dep, const fs::path &checkout,
+                 const std::string &commit, fs::path &out) -> bool {
+    std::error_code ec;
+    if (!fs::exists(checkout, ec)) {
       diags_.error(dep.loc, "checkout of '" + dep.name +
                                 "' is missing; run 'smelt fetch'");
       return false;
     }
-
-    const auto head = headCommit(dir);
-    if (!head || *head != e.commit) {
-      diags_.error(dep.loc,
-                   "checkout of '" + dep.name +
-                       "' is not at the locked commit; run 'smelt fetch'");
+    const auto head = headCommit(checkout);
+    if (!head || *head != commit) {
+      diags_.error(dep.loc, "checkout of '" + dep.name +
+                                "' is not at the locked commit; run "
+                                "'smelt fetch'");
       return false;
     }
+    out = fs::canonical(checkout);
     return true;
-  }
-
-  [[nodiscard]] auto cyclePath(const fs::path &again) const -> std::string {
-    std::string out;
-    const auto start = std::find(stack_.begin(), stack_.end(), again);
-    for (auto p = start; p != stack_.end(); ++p)
-      out += nameOf(*p) + " -> ";
-    return out + nameOf(again);
-  }
-
-  [[nodiscard]] auto nameOf(const fs::path &root) const -> std::string {
-    for (const auto &p : packages) {
-      if (p.root == root)
-        return p.model.project.name;
-    }
-    return root.string();
   }
 
   auto checkExports(const DependencyInfo &dep, std::size_t child) -> bool {
@@ -307,20 +317,35 @@ private:
       return std::nullopt;
     if (dep->target) {
       diags_.error(ref.loc, "dependency '" + alias + "' selects target '" +
-                                *dep->target + "'; wrote '" + alias +
+                                *dep->target + "'; write '" + alias +
                                 "' instead");
       return std::nullopt;
     }
     return exportedNode(pkg.deps.at(alias), targetName, ref.loc);
   }
 
-  std::vector<fs::path> stack_;
+  auto cyclePath(const fs::path &again) const -> std::string {
+    std::string out;
+    const auto start = std::find(stack_.begin(), stack_.end(), again);
+    for (auto p = start; p != stack_.end(); ++p)
+      out += nameOf(*p) + " -> ";
+    return out + nameOf(again);
+  }
+
+  auto nameOf(const fs::path &root) const -> std::string {
+    for (const auto &p : packages) {
+      if (p.root == root)
+        return p.model.project.name;
+    }
+    return root.string();
+  }
+
   fs::path rootDir_;
-  std::map<std::string, LockEntry> lock_;
+  Lock lock_;
+  std::vector<fs::path> stack_;
   std::map<fs::path, std::size_t> byDir_;
   Diagnostics &diags_;
 };
-
 } // namespace
 
 auto Workspace::load(const std::filesystem::path &root, Diagnostics &diags)

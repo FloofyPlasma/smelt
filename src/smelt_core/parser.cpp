@@ -11,8 +11,8 @@ namespace smelt {
 namespace {
 class Parser {
 public:
-  Parser(const std::vector<Token> &tokens, Diagnostics &diags)
-      : tokens_(tokens), diags_(diags) {}
+  Parser(const std::vector<Token> &tokens, Diagnostics &diags, bool sourceFile)
+      : tokens_(tokens), diags_(diags), sourceFile_(sourceFile) {}
 
   auto parseFile() -> ProjectFile {
     ProjectFile file;
@@ -20,6 +20,13 @@ public:
     while (!check(TokenKind::EndOfFile)) {
       if (check(TokenKind::Invalid)) {
         advance();
+        continue;
+      }
+
+      if (sourceFile_ && !check(TokenKind::KwSource)) {
+        diags_.error(peek().loc,
+                     "source.smelt may contain only a 'source' block");
+        skipDeclaration();
         continue;
       }
 
@@ -41,9 +48,13 @@ public:
           file.dependencies.push_back(std::move(*d));
         break;
       case TokenKind::KwSource:
-        diags_.error(peek().loc, std::string(tokenKindName(peek().kind)) +
-                                     " is not allowed in project.smelt");
-        skipDeclaration();
+        if (!sourceFile_) {
+          diags_.error(peek().loc, "'source' is only allowed in source.smelt");
+          skipDeclaration();
+          break;
+        }
+        if (auto s = parseSourceDecl())
+          file.sources.push_back(std::move(*s));
         break;
       default:
         diags_.error(peek().loc,
@@ -54,7 +65,7 @@ public:
       }
     }
 
-    if (file.projects.empty() && !diags_.hasErrors())
+    if (!sourceFile_ && file.projects.empty() && !diags_.hasErrors())
       diags_.error({1, 1}, "missing 'project' declaration");
 
     return file;
@@ -189,6 +200,22 @@ private:
 
     if (!check(TokenKind::String)) {
       expect(TokenKind::String, "a quoted dependency name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!parseAssignBlock(decl.assigns))
+      return std::nullopt;
+    return decl;
+  }
+
+  auto parseSourceDecl() -> std::optional<SourceDecl> {
+    SourceDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted source name");
       skipDeclaration();
       return std::nullopt;
     }
@@ -353,12 +380,19 @@ private:
   std::vector<Token> tokens_;
   Diagnostics &diags_;
   std::size_t pos_ = 0;
+  bool sourceFile_;
 };
 } // namespace
 
 auto parseProject(const std::vector<Token> &tokens, Diagnostics &diags)
     -> ProjectFile {
-  Parser parser(tokens, diags);
+  Parser parser(tokens, diags, false);
+  return parser.parseFile();
+}
+
+auto parseSourceFile(const std::vector<Token> &tokens, Diagnostics &diags)
+    -> ProjectFile {
+  Parser parser(tokens, diags, true);
   return parser.parseFile();
 }
 } // namespace smelt

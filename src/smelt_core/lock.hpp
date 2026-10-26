@@ -5,17 +5,21 @@
 #include <string>
 namespace smelt {
 struct LockEntry {
+  std::string kind;
   std::string url;
   std::string refKind;
   std::string ref;
   std::string commit;
 };
 
-[[nodiscard]] auto readLock(const std::filesystem::path &file,
-                            std::map<std::string, LockEntry> &out,
+struct Lock {
+  std::string registryCommit;
+  std::map<std::string, LockEntry> entries;
+};
+
+[[nodiscard]] auto readLock(const std::filesystem::path &file, Lock &out,
                             std::string &err) -> bool;
 
 [[nodiscard]] auto writeLock(const std::filesystem::path &file,
-                             const std::map<std::string, LockEntry> &entries)
-    -> bool;
+                             const Lock &lock) -> bool;
 } // namespace smelt

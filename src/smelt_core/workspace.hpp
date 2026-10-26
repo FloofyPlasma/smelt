@@ -31,6 +31,6 @@ struct Workspace {
 [[nodiscard]] auto findTarget(const Package &p, const std::string &name)
     -> const TargetInfo *;
 
-[[nodiscard]] auto loadModel(const std::filesystem::path &dir,
+[[nodiscard]] auto loadModel(const std::filesystem::path &file,
                              Diagnostics &diags) -> std::optional<Model>;
 } // namespace smelt

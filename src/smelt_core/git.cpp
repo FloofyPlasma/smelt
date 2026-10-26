@@ -1,5 +1,7 @@
 #include "git.hpp"
 #include "process.hpp"
+#include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -72,6 +74,22 @@ auto checkoutCommit(const fs::path &dir, const std::string &commit) -> bool {
     return false;
   }
   return headCommit(dir) == commit;
+}
+
+auto isAllowedGitUrl(const std::string &url) -> bool {
+  if (url.find_first_of(" \t\r\n") != std::string::npos)
+    return false;
+  if (url.rfind("https://", 0) == 0)
+    return true;
+  const char *local = std::getenv("SMELT_TEST_LOCAL_GIT");
+  return local != nullptr && std::string(local) == "1" &&
+         url.rfind("file://", 0) == 0;
+}
+
+auto isFullCommitHash(const std::string &s) -> bool {
+  return s.size() == 40 && std::all_of(s.begin(), s.end(), [](char c) {
+           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+         });
 }
 
 } // namespace smelt
