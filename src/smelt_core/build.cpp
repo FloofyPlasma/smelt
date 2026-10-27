@@ -4,7 +4,6 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
-#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
