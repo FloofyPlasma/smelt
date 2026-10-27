@@ -8,7 +8,7 @@
 #include <string>
 namespace smelt {
 enum class Optimization : std::uint8_t { None, Speed, Size };
-enum class TargetType : std::uint8_t { Exe, StaticLib };
+enum class TargetType : std::uint8_t { Exe, StaticLib, System };
 
 struct ProjectInfo {
   SourceLoc loc;
@@ -46,6 +46,7 @@ struct TargetInfo {
   bool exported = false;
   std::vector<std::string> publicIncludes;
   std::vector<std::string> privateIncludes;
+  std::vector<std::string> systemIncludes;
   std::vector<std::string> defines;
   std::vector<std::string> compileOptions;
   std::vector<std::string> link;
@@ -63,6 +64,7 @@ struct DependencyInfo {
   std::optional<std::string> registry;
   std::optional<std::string> version;
   std::optional<std::string> target;
+  std::vector<std::string> pkgConfig;
 };
 
 struct Model {

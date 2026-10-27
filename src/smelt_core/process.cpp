@@ -68,7 +68,7 @@ auto runProcessLogged(const std::vector<std::string> &argv,
   return -1;
 }
 
-auto runCapture(const std::vector<std::string> &argv)
+auto runCapture(const std::vector<std::string> &argv, const bool quietStderr)
     -> std::optional<std::string> {
   std::vector<char *> args;
   args.reserve(argv.size() + 1);
@@ -91,6 +91,13 @@ auto runCapture(const std::vector<std::string> &argv)
   }
 
   if (pid == 0) {
+    if (quietStderr) {
+      const int null = ::open("/dev/null", O_WRONLY);
+      if (null >= 0) {
+        ::dup2(null, STDERR_FILENO);
+        ::close(null);
+      }
+    }
     ::dup2(fds[1], STDOUT_FILENO);
     ::close(fds[0]);
     ::close(fds[1]);

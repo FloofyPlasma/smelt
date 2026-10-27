@@ -73,6 +73,8 @@ public:
 
       for (const auto &dep : model->dependencies) {
         diags_.setFile(v.file.string());
+        if (!dep.pkgConfig.empty())
+          continue;
         if (opts_.name && dep.name == *opts_.name)
           sawName_ = true;
 

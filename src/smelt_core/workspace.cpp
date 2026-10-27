@@ -4,10 +4,13 @@
 #include "lexer.hpp"
 #include "lock.hpp"
 #include "parser.hpp"
+#include "process.hpp"
 #include "registry.hpp"
 #include "sema.hpp"
+#include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -52,6 +55,21 @@ auto findDependency(const Model &m, const std::string &name)
       return &d;
   }
   return nullptr;
+}
+
+auto splitWords(const std::string &s) -> std::vector<std::string> {
+  std::vector<std::string> out;
+  std::istringstream in(s);
+  std::string word;
+  while (in >> word)
+    out.push_back(word);
+  return out;
+}
+
+auto trimmed(std::string s) -> std::string {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+    s.pop_back();
+  return s;
 }
 
 class StackGuard {
@@ -114,7 +132,8 @@ private:
         packages[index].model.dependencies;
     for (const auto &dep : decls) {
       diags_.setFile(display);
-      const auto child = loadDependency(dep, root);
+      const auto child = dep.pkgConfig.empty() ? loadDependency(dep, root)
+                                               : loadPkgConfig(dep);
       if (!child)
         return std::nullopt;
       packages[index].deps[dep.name] = *child;
@@ -162,6 +181,74 @@ private:
     if (const auto it = byDir_.find(root); it != byDir_.end())
       return it->second;
     return loadProject(file, root);
+  }
+
+  auto loadPkgConfig(const DependencyInfo &dep) -> std::optional<std::size_t> {
+    for (const auto &name : dep.pkgConfig) {
+      const auto version =
+          runCapture({"pkg-config", "--modversion", name}, true);
+      if (!version)
+        continue;
+
+      const auto cflags = runCapture({"pkg-config", "--cflags", name}, true);
+      const auto libs = runCapture({"pkg-config", "--libs", name}, true);
+      if (!cflags || !libs) {
+        diags_.error(dep.loc,
+                     "pkg-config could not report flags for '" + name + "'");
+        return std::nullopt;
+      }
+
+      const std::string ver = trimmed(*version);
+      std::cout << dep.name << ": pkg-config " << name << " (" << ver << ")\n";
+      return addSystemPackage(dep, ver, *cflags, *libs);
+    }
+
+    std::string tried;
+    for (const auto &name : dep.pkgConfig) {
+      if (!tried.empty())
+        tried += ", ";
+      tried += name;
+    }
+    diags_.error(dep.loc, "dependency '" + dep.name +
+                              "': no pkg-config package found (tried " + tried +
+                              ")");
+    return std::nullopt;
+  }
+
+  auto addSystemPackage(const DependencyInfo &dep, const std::string &version,
+                        const std::string &cflags, const std::string &libs)
+      -> std::size_t {
+    TargetInfo t;
+    t.loc = dep.loc;
+    t.name = dep.name;
+    t.type = TargetType::System;
+    t.exported = true;
+
+    const auto cf = splitWords(cflags);
+    for (std::size_t i = 0; i < cf.size(); ++i) {
+      const std::string &w = cf[i];
+      if (w.rfind("-I", 0) == 0 && w.size() > 2) {
+        t.systemIncludes.push_back(w.substr(2));
+      } else if (w == "-isystem" && i + 1 < cf.size()) {
+        t.systemIncludes.push_back(cf[++i]);
+      } else if (w.rfind("-D", 0) == 0 && w.size() > 2) {
+        t.defines.push_back(w.substr(2));
+      } else {
+        t.compileOptions.push_back(w);
+      }
+    }
+    t.link = splitWords(libs);
+
+    ProjectInfo info;
+    info.loc = dep.loc;
+    info.name = "pkg-config:" + dep.name;
+    info.version = version;
+
+    Package pkg;
+    pkg.model.project = info;
+    pkg.model.targets.push_back(std::move(t));
+    packages.push_back(std::move(pkg));
+    return packages.size() - 1;
   }
 
   auto lockedCheckout(const DependencyInfo &dep, fs::path &root) -> bool {
@@ -307,6 +394,8 @@ private:
       if (!dep)
         return std::nullopt;
       if (!dep->target) {
+        if (!dep->pkgConfig.empty())
+          return NodeKey{pkg.deps.at(ref.name), ref.name};
         diags_.error(ref.loc, "dependency '" + ref.name +
                                   "' selects no target; write '" + ref.name +
                                   ".<target>'");
