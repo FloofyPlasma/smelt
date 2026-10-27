@@ -212,6 +212,19 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  bool rootHasSystem = false;
+  {
+    smelt::Diagnostics pre("project.smelt");
+    if (const auto m = smelt::loadModel(root / projectFile, pre)) {
+      for (const auto &dep : m->dependencies) {
+        if (!dep.pkgConfig.empty())
+          rootHasSystem = true;
+      }
+    }
+  }
+  if (rootHasSystem && !smelt::requireTools({"pkg-config"}))
+    return 2;
+
   smelt::Diagnostics diags("project.smelt");
   auto ws = smelt::Workspace::load(root, diags);
   if (!ws) {
