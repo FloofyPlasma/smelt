@@ -1,5 +1,6 @@
 #pragma once
 
+#include "console.hpp"
 #include "discover.hpp"
 #include "sema.hpp"
 #include "workspace.hpp"
@@ -62,6 +63,6 @@ private:
   const Workspace &ws_;
   const std::vector<SourceMap> &sources_;
   ProfileInfo profile_;
-  std::mutex console_;
+  Console console_;
 };
 } // namespace smelt

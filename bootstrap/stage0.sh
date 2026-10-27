@@ -29,6 +29,7 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/registry.cpp" \
   "$ROOT/src/smelt_core/compdb.cpp" \
   "$ROOT/src/smelt_core/install.cpp" \
+  "$ROOT/src/smelt_core/console.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -pthread -o "$OUT/smelt"
 

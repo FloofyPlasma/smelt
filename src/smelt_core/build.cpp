@@ -1,4 +1,5 @@
 #include "build.hpp"
+#include "console.hpp"
 #include "discover.hpp"
 #include "process.hpp"
 #include "sema.hpp"
@@ -130,18 +131,22 @@ void writeSignature(const fs::path &sig, const std::string &sigText) {
   out << sigText;
 }
 
-void printLog(const fs::path &log, std::mutex &out) {
+void printLog(const fs::path &log, Console &console) {
   const auto text = readText(log);
   if (!text || text->empty())
     return;
-  std::lock_guard lock(out);
-  std::cerr << *text;
+  std::string s = *text;
+  if (!s.empty() && s.back() == '\n')
+    s.pop_back();
+  console.err(s);
 }
 
-bool runCompile(const std::vector<std::string> &args, const fs::path &obj,
-                const fs::path &dep, const fs::path &sig,
-                const std::string &sigText, const fs::path &source,
-                const std::string &label, std::mutex &out) {
+enum class Outcome { Built, Cached, Failed };
+
+Outcome runCompile(const std::vector<std::string> &args, const fs::path &obj,
+                   const fs::path &dep, const fs::path &sig,
+                   const std::string &sigText, const fs::path &source,
+                   Console &console) {
   const fs::path log = fs::path(obj.string() + ".log");
 
   const auto deps = readDepFile(dep);
@@ -151,74 +156,58 @@ bool runCompile(const std::vector<std::string> &args, const fs::path &obj,
       inputs.emplace_back(d);
   }
   if (deps && !isStale(obj, sig, sigText, inputs)) {
-    printLog(log, out);
-    return true;
+    printLog(log, console);
+    return Outcome::Cached;
   }
 
   fs::create_directories(obj.parent_path());
   fs::remove(sig);
 
-  {
-    std::lock_guard lock(out);
-    std::cout << "  " << label << "\n";
-  }
-
   const int rc = runProcessLogged(args, log.string());
-  printLog(log, out);
+  printLog(log, console);
 
   if (rc != 0) {
-    std::lock_guard lock(out);
-    std::cerr << "smelt: compile failed: " << joinCommand(args) << "\n";
-    return false;
+    console.err("smelt: compile failed: " + joinCommand(args));
+    return Outcome::Failed;
   }
   writeSignature(sig, sigText);
-  return true;
+  return Outcome::Built;
 }
 
-bool runArchive(const std::vector<std::string> &args, const fs::path &out,
-                const fs::path &sig, const std::string &sigText,
-                const std::vector<fs::path> &objects, const std::string &name,
-                std::mutex &console) {
+Outcome runArchive(const std::vector<std::string> &args, const fs::path &out,
+                   const fs::path &sig, const std::string &sigText,
+                   const std::vector<fs::path> &objects, Console &console) {
   if (!isStale(out, sig, sigText, objects))
-    return true;
+    return Outcome::Cached;
 
   fs::create_directories(out.parent_path());
   fs::remove(out);
   fs::remove(sig);
-  {
-    std::lock_guard lock(console);
-    std::cout << "  AR  lib" << name << ".a\n";
-  }
+
   if (runProcess(args) != 0) {
-    std::lock_guard lock(console);
-    std::cerr << "smelt: archive failed: " << joinCommand(args) << "\n";
-    return false;
+    console.err("smelt: archive failed " + joinCommand(args));
+    return Outcome::Failed;
   }
   writeSignature(sig, sigText);
-  return true;
+  return Outcome::Built;
 }
 
-bool runLink(const std::vector<std::string> &args, const fs::path &out,
-             const fs::path &sig, const std::string &sigText,
-             const std::vector<fs::path> &inputs, const std::string &name,
-             std::mutex &console) {
+Outcome runLink(const std::vector<std::string> &args, const fs::path &out,
+                const fs::path &sig, const std::string &sigText,
+                const std::vector<fs::path> &inputs, Console &console) {
   if (!isStale(out, sig, sigText, inputs))
-    return true;
+    return Outcome::Cached;
 
   fs::create_directories(out.parent_path());
   fs::remove(out);
   fs::remove(sig);
-  {
-    std::lock_guard lock(console);
-    std::cout << "  LD  " << name << "\n";
-  }
+
   if (runProcess(args) != 0) {
-    std::lock_guard lock(console);
-    std::cerr << "smelt: link failed: " << joinCommand(args) << "\n";
-    return false;
+    console.err("smelt: link failed: " + joinCommand(args));
+    return Outcome::Failed;
   }
   writeSignature(sig, sigText);
-  return true;
+  return Outcome::Built;
 }
 
 void dedupe(std::vector<std::string> &v) {
@@ -257,9 +246,10 @@ auto parseDefine(const std::string &text, const std::string &source,
 }
 
 struct Job {
-  std::function<bool()> run;
+  std::function<Outcome()> run;
   std::vector<std::size_t> next;
   std::size_t waiting = 0;
+  std::string label;
   bool done = false;
 };
 } // namespace
@@ -493,7 +483,7 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
 
 auto Builder::build(const NodeKey &root, const std::size_t jobs)
     -> std::optional<fs::path> {
-  std::vector<Job> graph;
+  std::deque<Job> graph;
   std::map<NodeKey, std::size_t> producer;
   std::map<NodeKey, fs::path> outputPath;
   std::set<NodeKey> planned;
@@ -543,9 +533,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
       Job j;
       j.run = [=, &console = console_] {
-        return runCompile(args, obj, depFile, sig, sigText, file.path, label,
-                          console);
+        return runCompile(args, obj, depFile, sig, sigText, file.path, console);
       };
+      j.label = label;
       graph.push_back(std::move(j));
       compileJobs.push_back(graph.size() - 1);
       objects.push_back(obj);
@@ -562,8 +552,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
       Job j;
       j.run = [=, &console = console_] {
-        return runArchive(args, out, sig, sigText, objects, t.name, console);
+        return runArchive(args, out, sig, sigText, objects, console);
       };
+      j.label = "AR  lib" + t.name + ".a";
       graph.push_back(std::move(j));
       outJob = graph.size() - 1;
       outputPath[node] = out;
@@ -599,8 +590,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
       Job j;
       j.run = [=, &console = console_] {
-        return runLink(args, out, sig, sigText, inputs, t.name, console);
+        return runLink(args, out, sig, sigText, inputs, console);
       };
+      j.label = "LD  " + t.name;
       graph.push_back(std::move(j));
       outJob = graph.size() - 1;
       for (const auto jobIndex : libJobs) {
@@ -620,6 +612,8 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
   plan(root);
   if (!planOk)
     return std::nullopt;
+
+  console_.setTotal(graph.size());
 
   std::mutex mu;
   std::condition_variable cv;
@@ -648,13 +642,16 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
         ready.pop_front();
       }
 
-      const bool ok = graph[job].run();
+      console_.startJob(graph[job].label);
+      const Outcome outcome = graph[job].run();
 
       std::lock_guard lock(mu);
       ++finished;
-      if (!ok) {
+      if (outcome == Outcome::Failed) {
+        console_.failJob(graph[job].label);
         failed = true;
       } else {
+        console_.finishJob(graph[job].label, outcome == Outcome::Built);
         for (const auto next : graph[job].next) {
           if (--graph[next].waiting == 0)
             ready.push_back(next);
@@ -673,6 +670,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
   if (failed)
     return std::nullopt;
+
+  console_.finish();
+
   return outputPath.at(root);
 }
 } // namespace smelt
