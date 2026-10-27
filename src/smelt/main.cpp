@@ -3,6 +3,7 @@
 #include "diagnostics.hpp"
 #include "discover.hpp"
 #include "fetch.hpp"
+#include "install.hpp"
 #include "process.hpp"
 #include "sema.hpp"
 #include "workspace.hpp"
@@ -22,6 +23,7 @@ struct Options {
   std::string command;
   std::string profile = "debug";
   std::string updateName;
+  std::string prefix;
   std::optional<std::string> target;
   std::vector<std::string> runArgs;
   std::size_t jobs =
@@ -33,6 +35,8 @@ void usage() {
                "  smelt build [--profile NAME] [--target NAME] [--jobs N]\n"
                "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
                "  smelt update [NAME]\n"
+               "  smelt install   [--prefix DIR]\n"
+               "  smelt uninstall [--prefix DIR]\n"
                "  smelt clean\n"
                "  smelt fetch\n"
                "  smelt compdb [--profile NAME]\n";
@@ -45,7 +49,8 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
 
   const bool known = o.command == "build" || o.command == "run" ||
                      o.command == "clean" || o.command == "fetch" ||
-                     o.command == "update" || o.command == "compdb";
+                     o.command == "update" || o.command == "compdb" ||
+                     o.command == "install" || o.command == "uninstall";
 
   if (!known)
     return false;
@@ -59,6 +64,9 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     }
     if (arg == "--profile" && i + 1 < argc) {
       o.profile = argv[++i];
+    } else if (arg == "--prefix" && i + 1 < argc &&
+               (o.command == "install" || o.command == "uninstall")) {
+      o.prefix = argv[++i];
     } else if ((arg == "--jobs" && i + 1 < argc) &&
                (o.command == "build" || o.command == "run")) {
       const std::string value = argv[++i];
@@ -118,6 +126,20 @@ int main(int argc, char **argv) {
     }
     std::cout << "cleaned build/\n";
     return 0;
+  }
+
+  if (opts.command == "install" || opts.command == "uninstall") {
+    fs::path prefix;
+    if (!opts.prefix.empty()) {
+      prefix = fs::path(opts.prefix);
+    } else if (const char *home = std::getenv("HOME"); home && *home) {
+      prefix = fs::path(home) / ".local";
+    } else {
+      std::cerr << "smelt: HOME is not set; use --prefix\n";
+      return 2;
+    }
+    return opts.command == "install" ? smelt::installSelf(root, prefix)
+                                     : smelt::uninstallSelf(prefix);
   }
 
   if (opts.command == "fetch" || opts.command == "update") {
