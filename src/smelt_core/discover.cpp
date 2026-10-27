@@ -33,8 +33,7 @@ auto platformRules(const TargetInfo &t) -> const PlatformRules * {
 
 auto discoverSources(const Model &model,
                      const std::filesystem::path &projectRoot,
-                     Diagnostics &diags, std::vector<std::string> &warnings)
-    -> std::optional<SourceMap> {
+                     Diagnostics &diags) -> std::optional<SourceMap> {
   SourceMap out;
   std::map<std::string, std::string> owners;
   bool ok = true;
@@ -73,24 +72,24 @@ auto discoverSources(const Model &model,
 
     const PlatformRules *plat = platformRules(t);
 
-    auto warnUnmatched = [&](const std::vector<std::string> &patterns,
-                             const std::string &label) {
+    auto requireMatches = [&](const std::vector<std::string> &patterns,
+                              const std::string &label) {
       for (const auto &p : patterns) {
         const bool used =
             std::any_of(everything.begin(), everything.end(),
                         [&](const std::string &f) { return globMatch(p, f); });
         if (!used) {
-          warnings.push_back("target '" + t.name + "': " + label +
-                             " pattern '" + p + "' matches no file");
+          diags.error(t.loc, "target '" + t.name + "': " + label +
+                                 " pattern '" + p + "' matches no file");
         }
       }
     };
-    warnUnmatched(t.files, "files");
-    warnUnmatched(t.exclude, "exclude");
+    requireMatches(t.files, "files");
+    requireMatches(t.exclude, "exclude");
     if (plat) {
       const std::string prefix = "on " + std::string(kPlatform) + " ";
-      warnUnmatched(plat->files, prefix + "files");
-      warnUnmatched(plat->exclude, prefix + "exclude");
+      requireMatches(plat->files, prefix + "files");
+      requireMatches(plat->exclude, prefix + "exclude");
     }
 
     std::vector<std::string> allow = t.files;

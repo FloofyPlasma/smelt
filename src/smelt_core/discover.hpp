@@ -21,9 +21,9 @@ struct TargetSources {
 
 using SourceMap = std::map<std::string, TargetSources>;
 
-[[nodiscard]] auto
-discoverSources(const Model &model, const std::filesystem::path &projectRoot,
-                Diagnostics &diags, std::vector<std::string> &warnings)
+[[nodiscard]] auto discoverSources(const Model &model,
+                                   const std::filesystem::path &projectRoot,
+                                   Diagnostics &diags)
     -> std::optional<SourceMap>;
 
 [[nodiscard]] auto checkOwnership(const std::vector<SourceMap> &sources,

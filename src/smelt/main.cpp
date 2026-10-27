@@ -8,7 +8,9 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -103,6 +105,12 @@ std::vector<std::string> rootTargetNames(const smelt::Workspace &ws) {
     names.push_back(t.name);
   return names;
 }
+
+void printOutput(const smelt::TargetInfo &t, const fs::path &out,
+                 const fs::path &root) {
+  const std::string kind = t.type == smelt::TargetType::Exe ? "exe" : "lib";
+  std::cout << "  " << kind << "  " << fs::relative(out, root).string() << "\n";
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -113,6 +121,8 @@ int main(int argc, char **argv) {
     usage();
     return 2;
   }
+
+  const auto started = std::chrono::steady_clock::now();
 
   const fs::path root = fs::canonical(fs::current_path());
   const std::string projectFile = "project.smelt";
@@ -175,10 +185,7 @@ int main(int argc, char **argv) {
   std::vector<smelt::SourceMap> sources;
   for (const auto &pkg : ws->packages) {
     diags.setFile(pkg.projectFile);
-    std::vector<std::string> warnings;
-    auto map = smelt::discoverSources(pkg.model, pkg.root, diags, warnings);
-    for (const auto &w : warnings)
-      std::cerr << pkg.projectFile << ": warning: " << w << "\n";
+    auto map = smelt::discoverSources(pkg.model, pkg.root, diags);
     if (!map) {
       printDiagnostics(diags);
       return 1;
@@ -208,20 +215,30 @@ int main(int argc, char **argv) {
   }
 
   if (opts.command == "build") {
+    std::vector<std::string> names;
     if (opts.target) {
       if (!smelt::findTarget(ws->packages[0], *opts.target)) {
         std::cerr << "smelt: unknown target '" << *opts.target << "'\n";
         return 1;
       }
-      if (!builder.build(smelt::NodeKey{0, *opts.target}, opts.jobs))
-        return 1;
+      names.push_back(*opts.target);
     } else {
-      for (const auto &t : rootTargets) {
-        if (!builder.build(smelt::NodeKey{0, t.name}, opts.jobs))
-          return 1;
-      }
+      for (const auto &t : rootTargets)
+        names.push_back(t.name);
     }
-    std::cout << "build ok (" << profile->name << ")\n";
+
+    for (const auto &name : names) {
+      const auto out = builder.build(smelt::NodeKey{0, name}, opts.jobs);
+      if (!out)
+        return 1;
+      printOutput(*smelt::findTarget(ws->packages[0], name), *out, root);
+    }
+
+    const double secs = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - started)
+                            .count();
+    std::cout << std::fixed << std::setprecision(1) << "build ok ("
+              << profile->name << ") in " << secs << "s\n";
     return 0;
   }
 

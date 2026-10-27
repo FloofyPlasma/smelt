@@ -177,8 +177,10 @@ private:
     const std::string ref = dep.tag ? *dep.tag : dep.commit.value_or("");
     if (e.kind != "git" || e.url != *dep.git || e.refKind != kind ||
         e.ref != ref) {
-      diags_.error(dep.loc, "smelt.lock does not match project.smelt for '" +
-                                dep.name + "'; run 'smelt fetch'");
+      diags_.error(dep.loc,
+                   "registry entry for '" + dep.name +
+                       "' differs from smelt.lock; run 'smelt update " +
+                       dep.name + "' to move it");
       return false;
     }
     return checkedAt(dep, checkoutDir(rootDir_, dep.name), e.commit, root);
@@ -203,8 +205,10 @@ private:
     const fs::path reg = registryDir(rootDir_);
     std::error_code ec;
     if (!fs::exists(reg, ec) || headCommit(reg) != lock_.registryCommit) {
-      diags_.error(dep.loc, "registry checkout is missing or not at the "
-                            "locked commit; run 'smelt fetch'");
+      diags_.error(dep.loc,
+                   "registry entry for '" + dep.name +
+                       "' differs from smelt.lock; run 'smelt update " +
+                       dep.name + "' to move it");
       return false;
     }
 
@@ -212,9 +216,10 @@ private:
     if (!entry)
       return false;
     if (entry->upstreamUrl != e.url || entry->upstreamCommit != e.commit) {
-      diags_.error(dep.loc, "registry entry for '" + dep.name +
-                                "' changed since smelt.lock was written; run "
-                                "'smelt fetch'");
+      diags_.error(dep.loc,
+                   "registry entry for '" + dep.name +
+                       "' differs from smelt.lock; run 'smelt update " +
+                       dep.name + "' to move it");
       return false;
     }
 
