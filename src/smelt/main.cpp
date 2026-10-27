@@ -38,18 +38,19 @@ struct Options {
       std::max<std::size_t>(1, std::thread::hardware_concurrency());
 };
 
-void usage() {
-  std::cerr << "usage:\n"
-               "  smelt build [--profile NAME] [--target NAME] [--jobs N]\n"
-               "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
-               "  smelt update [NAME]\n"
-               "  smelt install   [--prefix DIR]\n"
-               "  smelt uninstall [--prefix DIR]\n"
-               "  smelt clean\n"
-               "  smelt fetch\n"
-               "  smelt tree\n"
-               "  smelt compdb [--profile NAME]\n"
-               "  smelt --version\n";
+void usage(bool toStdout = false) {
+  std::ostream &out = toStdout ? std::cout : std::cerr;
+  out << "usage:\n"
+         "  smelt build [--profile NAME] [--target NAME] [--jobs N]\n"
+         "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
+         "  smelt update [NAME]\n"
+         "  smelt install   [--prefix DIR]\n"
+         "  smelt uninstall [--prefix DIR]\n"
+         "  smelt clean\n"
+         "  smelt fetch\n"
+         "  smelt tree\n"
+         "  smelt compdb [--profile NAME]\n"
+         "  smelt --version\n";
 }
 
 auto parseOptions(int argc, char **argv, Options &o) -> bool {
@@ -65,6 +66,12 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
   if (argc == 2 && std::string(argv[1]) == "--version") {
     o.command = "version";
     return true;
+  }
+
+  if (argc == 2 &&
+      (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
+    usage(true);
+    std::exit(0);
   }
 
   if (!known)
