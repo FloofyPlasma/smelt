@@ -2,6 +2,7 @@
 
 #include "diagnostics.hpp"
 #include <filesystem>
+#include <optional>
 #include <string>
 namespace smelt {
 

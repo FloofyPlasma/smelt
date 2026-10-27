@@ -17,6 +17,27 @@ auto trim(std::string s) -> std::string {
     s.pop_back();
   return s;
 }
+
+auto runGit(const fs::path &dir, const std::vector<std::string> &args) -> bool {
+  std::vector<std::string> argv{"git", "-C", dir.string()};
+  argv.insert(argv.end(), args.begin(), args.end());
+
+  const std::string log = dir.string() + ".log";
+  std::error_code ec;
+  if (runProcessLogged(argv, log) == 0) {
+    fs::remove(log, ec);
+    return true;
+  }
+  std::cerr << "smelt: git failed; see " << log << "\n";
+  return false;
+}
+
+auto hasCommit(const fs::path &dir, const std::string &commit) -> bool {
+  return runCapture({"git", "-C", dir.string(), "cat-file", "-e",
+                     commit + "^{commit}"},
+                    true)
+      .has_value();
+}
 } // namespace
 
 auto checkoutDir(const fs::path &root, const std::string &name) -> fs::path {
@@ -33,16 +54,20 @@ auto headCommit(const fs::path &dir) -> std::optional<std::string> {
 
 auto ensureClone(const std::string &url, const fs::path &dir) -> bool {
   std::error_code ec;
-  if (fs::exists(dir, ec))
+  if (fs::exists(dir / ".git", ec))
     return true;
 
-  fs::create_directories(dir.parent_path());
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir.parent_path(), ec);
   std::cout << "  GIT clone " << url << "\n";
-  if (runProcess({"git", "clone", "-q", url, dir.string()}) != 0) {
-    std::cerr << "smelt: cannot clone '" << url << "'\n";
+
+  const std::string log = dir.string() + ".log";
+  if (runProcessLogged({"git", "clone", "-q", url, dir.string()}, log) != 0) {
+    std::cerr << "smelt: cannot clone '" << url << "'; see " << log << "\n";
     fs::remove_all(dir, ec);
     return false;
   }
+  fs::remove(log, ec);
   return true;
 }
 
@@ -103,4 +128,69 @@ auto originUrl(const fs::path &dir) -> std::optional<std::string> {
   return trim(*out);
 }
 
+auto remoteTagCommit(const std::string &url, const std::string &tag)
+    -> std::optional<std::string> {
+  const auto out = runCapture({"git", "ls-remote", "--tags", url});
+  if (!out)
+    return std::nullopt;
+
+  std::optional<std::string> direct, peeled;
+  std::istringstream lines(*out);
+  std::string line;
+  while (std::getline(lines, line)) {
+    const auto tab = line.find('\t');
+    if (tab == std::string::npos)
+      continue;
+    const std::string sha = line.substr(0, tab);
+    const std::string ref = line.substr(tab + 1);
+    if (ref == "refs/tags/" + tag)
+      direct = sha;
+    else if (ref == "refs/tags/" + tag + "^{}")
+      peeled = sha;
+  }
+  return peeled ? peeled : direct;
+}
+
+auto fetchHistory(const std::string &url, const fs::path &dir,
+                  const std::string &commit) -> bool {
+  std::error_code ec;
+  if (!fs::exists(dir / ".git", ec)) {
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    if (!runGit(dir, {"init", "-q"}) ||
+        !runGit(dir, {"remote", "add", "origin", url}))
+      return false;
+  }
+
+  if (hasCommit(dir, commit))
+    return true;
+
+  std::cout << "  GIT fetch " << url << " at " << commit.substr(0, 12) << "\n";
+  if (!runGit(dir, {"fetch", "-q", "--depth", "1", "--filter=blob:none",
+                    "origin", commit})) {
+    std::cerr << "smelt: " << url << " does not serve commit " << commit
+              << " directly\n";
+    return false;
+  }
+  return true;
+}
+
+auto checkoutPaths(const fs::path &dir, const std::string &commit,
+                   const std::vector<std::string> &paths) -> bool {
+  std::error_code ec;
+  if (paths.empty()) {
+    if (fs::exists(dir / ".git" / "info" / "sparse-checkout", ec) &&
+        !runGit(dir, {"sparse-checkout", "disable"}))
+      return false;
+  } else {
+    std::vector<std::string> set = {"sparse-checkout", "set", "--no-cone"};
+    set.insert(set.end(), paths.begin(), paths.end());
+    if (!runGit(dir, set))
+      return false;
+  }
+
+  if (!runGit(dir, {"reset", "-q", "--hard", commit}))
+    return false;
+  return headCommit(dir) == commit;
+}
 } // namespace smelt

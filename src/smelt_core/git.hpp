@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 namespace smelt {
 [[nodiscard]] auto checkoutDir(const std::filesystem::path &root,
                                const std::string &name)
@@ -27,4 +28,13 @@ namespace smelt {
 
 [[nodiscard]] auto originUrl(const std::filesystem::path &dir)
     -> std::optional<std::string>;
+[[nodiscard]] auto remoteTagCommit(const std::string &url,
+                                   const std::string &tag)
+    -> std::optional<std::string>;
+[[nodiscard]] auto fetchHistory(const std::string &url,
+                                const std::filesystem::path &dir,
+                                const std::string &commit) -> bool;
+[[nodiscard]] auto checkoutPaths(const std::filesystem::path &dir,
+                                 const std::string &commit,
+                                 const std::vector<std::string> &paths) -> bool;
 } // namespace smelt
