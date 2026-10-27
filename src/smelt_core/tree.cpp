@@ -1,8 +1,10 @@
 #include "tree.hpp"
 #include "git.hpp"
 #include "lock.hpp"
+#include "process.hpp"
 #include "registry.hpp"
 #include "sema.hpp"
+#include "tools.hpp"
 #include "workspace.hpp"
 #include <cstddef>
 #include <filesystem>
@@ -56,6 +58,12 @@ auto firstError(const Diagnostics &d) -> std::string {
   if (d.items().empty())
     return "invalid project file";
   return "invalid project file: " + d.items().front().message;
+}
+
+auto trimmed(std::string s) -> std::string {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+    s.pop_back();
+  return s;
 }
 
 class Tree {
@@ -116,6 +124,11 @@ private:
       return out;
     }
 
+    if (!dep.pkgConfig.empty()) {
+      out.missing = "";
+      return out;
+    }
+
     if (!lock_.entries.count(dep.name)) {
       out.missing = "not in smelt.lock; run 'smelt fetch'";
       return out;
@@ -150,6 +163,9 @@ private:
 
   auto resolve(const DependencyInfo &dep, const fs::path &parent)
       -> std::size_t {
+    if (!dep.pkgConfig.empty())
+      return resolvePkgConfig(dep);
+
     const Location loc = locate(dep, parent);
     if (!loc.missing.empty()) {
       Project p;
@@ -176,6 +192,47 @@ private:
     const std::size_t idx = projects_.size() - 1;
     byRoot_[loc.root] = idx;
     return idx;
+  }
+
+  auto resolvePkgConfig(const DependencyInfo &dep) -> std::size_t {
+    Project p;
+    p.label = dep.name;
+
+    if (!findOnPath("pkg-config")) {
+      p.missing = "pkg-config is not installed";
+      projects_.push_back(std::move(p));
+      return projects_.size() - 1;
+    }
+
+    for (const auto &name : dep.pkgConfig) {
+      const auto version =
+          runCapture({"pkg-config", "--modversion", name}, true);
+      if (!version)
+        continue;
+
+      Model m;
+      m.project.name = "pkg-config:" + dep.name;
+      TargetInfo t;
+      t.name = dep.name;
+      t.type = TargetType::System;
+      t.exported = true;
+      m.targets.push_back(std::move(t));
+
+      p.model = std::move(m);
+      p.label = "pkg-config " + name + " (" + trimmed(*version) + ")";
+      projects_.push_back(std::move(p));
+      return projects_.size() - 1;
+    }
+
+    std::string tried;
+    for (const auto &name : dep.pkgConfig) {
+      if (!tried.empty())
+        tried += ", ";
+      tried += name;
+    }
+    p.missing = "no pkg-config package found (tried " + tried + ")";
+    projects_.push_back(std::move(p));
+    return projects_.size() - 1;
   }
 
   void printRoot() {
@@ -219,12 +276,19 @@ private:
       } else {
         const DependencyInfo *d = findDependencyIn(*op.model, ref);
         const auto p = projectFor(ref);
-        if (d == nullptr || !d->target || !p) {
+        if (d == nullptr || !p) {
           std::cout << indent << ref << "  (no target selected)\n";
           return;
         }
         proj = *p;
-        target = *d->target;
+        if (d->target) {
+          target = *d->target;
+        } else if (!d->pkgConfig.empty()) {
+          target = ref;
+        } else {
+          std::cout << indent << ref << "  (no target selected)\n";
+          return;
+        }
       }
     } else {
       const std::string alias = ref.substr(0, dot);
@@ -257,9 +321,11 @@ private:
       return;
     }
 
-    std::string line = indent + label + "  " + kindOf(*t);
-    if (t->exported)
-      line += ", exported";
+    std::string line = indent + label + "  ";
+    if (t->type == TargetType::System)
+      line += p.label;
+    else
+      line += kindOf(*t) + (t->exported ? ", exported" : "");
 
     if (!shown_.insert({proj, target}).second) {
       std::cout << line << "  (see above)\n";

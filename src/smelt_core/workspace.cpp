@@ -7,6 +7,7 @@
 #include "process.hpp"
 #include "registry.hpp"
 #include "sema.hpp"
+#include "tools.hpp"
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -184,6 +185,11 @@ private:
   }
 
   auto loadPkgConfig(const DependencyInfo &dep) -> std::optional<std::size_t> {
+    if (!smelt::findOnPath("pkg-config")) {
+      diags_.error(dep.loc, "required tool 'pkg-config' not found on PATH");
+      return std::nullopt;
+    }
+
     for (const auto &name : dep.pkgConfig) {
       const auto version =
           runCapture({"pkg-config", "--modversion", name}, true);
