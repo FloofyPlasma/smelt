@@ -24,4 +24,7 @@ namespace smelt {
 [[nodiscard]] auto isAllowedGitUrl(const std::string &url) -> bool;
 
 [[nodiscard]] auto isFullCommitHash(const std::string &s) -> bool;
+
+[[nodiscard]] auto originUrl(const std::filesystem::path &dir)
+    -> std::optional<std::string>;
 } // namespace smelt

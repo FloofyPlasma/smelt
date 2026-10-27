@@ -5,6 +5,10 @@
 #include <optional>
 #include <string>
 namespace smelt {
+
+inline constexpr const char *kDefaultRegistryUrl =
+    "https://github.com/FloofyPlasma/smelt-registry";
+
 struct RegistryEntry {
   std::string upstreamUrl;
   std::string upstreamCommit;

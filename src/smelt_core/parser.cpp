@@ -18,51 +18,56 @@ public:
     ProjectFile file;
 
     while (!check(TokenKind::EndOfFile)) {
+      const std::size_t before = pos_;
+
       if (check(TokenKind::Invalid)) {
         advance();
-        continue;
-      }
-
-      if (sourceFile_ && !check(TokenKind::KwSource)) {
+      } else if (sourceFile_ && !check(TokenKind::KwSource)) {
         diags_.error(peek().loc,
                      "source.smelt may contain only a 'source' block");
         skipDeclaration();
-        continue;
-      }
-
-      switch (peek().kind) {
-      case TokenKind::KwProject:
-        if (auto p = parseProjectDecl())
-          file.projects.push_back(std::move(*p));
-        break;
-      case TokenKind::KwProfile:
-        if (auto p = parseProfileDecl())
-          file.profiles.push_back(std::move(*p));
-        break;
-      case TokenKind::KwTarget:
-        if (auto t = parseTargetDecl())
-          file.targets.push_back(std::move(*t));
-        break;
-      case TokenKind::KwDependency:
-        if (auto d = parseDependencyDecl())
-          file.dependencies.push_back(std::move(*d));
-        break;
-      case TokenKind::KwSource:
-        if (!sourceFile_) {
-          diags_.error(peek().loc, "'source' is only allowed in source.smelt");
+      } else {
+        switch (peek().kind) {
+        case TokenKind::KwProject:
+          if (auto p = parseProjectDecl())
+            file.projects.push_back(std::move(*p));
+          break;
+        case TokenKind::KwProfile:
+          if (auto p = parseProfileDecl())
+            file.profiles.push_back(std::move(*p));
+          break;
+        case TokenKind::KwTarget:
+          if (auto t = parseTargetDecl())
+            file.targets.push_back(std::move(*t));
+          break;
+        case TokenKind::KwDependency:
+          if (sourceFile_) {
+            diags_.error(peek().loc,
+                         "'dependency' is not allowed in source.smelt");
+            skipDeclaration();
+          } else if (auto d = parseDependencyDecl()) {
+            file.dependencies.push_back(std::move(*d));
+          }
+          break;
+        case TokenKind::KwSource:
+          if (!sourceFile_) {
+            diags_.error(peek().loc,
+                         "'source' is only allowed in source.smelt");
+            skipDeclaration();
+          } else if (auto s = parseSourceDecl()) {
+            file.sources.push_back(std::move(*s));
+          }
+          break;
+        default:
+          diags_.error(peek().loc, "expected a declaration, found " +
+                                       std::string(tokenKindName(peek().kind)));
           skipDeclaration();
           break;
         }
-        if (auto s = parseSourceDecl())
-          file.sources.push_back(std::move(*s));
-        break;
-      default:
-        diags_.error(peek().loc,
-                     "expected 'project', 'profile', or 'target', found " +
-                         std::string(tokenKindName(peek().kind)));
-        skipDeclaration();
-        break;
       }
+
+      if (pos_ == before)
+        advance();
     }
 
     if (!sourceFile_ && file.projects.empty() && !diags_.hasErrors())
@@ -82,6 +87,23 @@ private:
     if (pos_ + 1 < tokens_.size())
       ++pos_;
     return t;
+  }
+
+  [[nodiscard]] static auto isKeyword(TokenKind kind) -> bool {
+    return kind == TokenKind::KwProject || kind == TokenKind::KwProfile ||
+           kind == TokenKind::KwTarget || kind == TokenKind::KwDependency ||
+           kind == TokenKind::KwSource || kind == TokenKind::KwOn ||
+           kind == TokenKind::KwTrue || kind == TokenKind::KwFalse;
+  }
+
+  [[nodiscard]] auto isSettingName() const -> bool {
+    if (check(TokenKind::Identifier))
+      return true;
+    return isKeyword(peek().kind) && peek(1).kind == TokenKind::Equals;
+  }
+
+  [[nodiscard]] auto atDeclaration() const -> bool {
+    return isTopLevelKeyword(peek().kind) && peek(1).kind != TokenKind::Equals;
   }
 
   [[nodiscard]] auto check(TokenKind kind) const -> bool {
@@ -107,7 +129,7 @@ private:
     while (!check(TokenKind::EndOfFile)) {
       if (accept(TokenKind::Semicolon))
         return;
-      if (check(TokenKind::RBrace) || isTopLevelKeyword(peek().kind))
+      if (check(TokenKind::RBrace) || atDeclaration())
         return;
       advance();
     }
@@ -115,7 +137,7 @@ private:
 
   void skipToBlockEnd() {
     while (!check(TokenKind::EndOfFile) && !check(TokenKind::RBrace)) {
-      if (isTopLevelKeyword(peek().kind))
+      if (atDeclaration())
         return;
       advance();
     }
@@ -178,7 +200,7 @@ private:
     }
 
     while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
-      if (isTopLevelKeyword(peek().kind))
+      if (atDeclaration())
         break;
 
       if (check(TokenKind::KwOn)) {
@@ -245,7 +267,7 @@ private:
     }
 
     while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
-      if (isTopLevelKeyword(peek().kind))
+      if (atDeclaration())
         break;
       if (auto a = parseAssign())
         block.assigns.push_back(std::move(*a));
@@ -263,7 +285,7 @@ private:
     }
 
     while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
-      if (isTopLevelKeyword(peek().kind))
+      if (atDeclaration())
         break;
       if (auto a = parseAssign())
         out.push_back(std::move(*a));
@@ -278,7 +300,7 @@ private:
       return std::nullopt;
     }
 
-    if (!check(TokenKind::Identifier)) {
+    if (!isSettingName()) {
       diags_.error(peek().loc, "expected a setting name, found " +
                                    std::string(tokenKindName(peek().kind)));
       skipDeclaration();

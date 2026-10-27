@@ -81,14 +81,10 @@ auto readSourceFile(const fs::path &file, Diagnostics &out)
 
 auto registryUrl(Diagnostics &diags) -> std::optional<std::string> {
   const char *env = std::getenv("SMELT_REGISTRY");
-  if (env == nullptr || *env == '\0') {
-    diags.error({}, "no registry configured; set SMELT_REGISTRY to the "
-                    "registry repository URL");
-    return std::nullopt;
-  }
-  const std::string url = env;
+  const std::string url =
+      (env != nullptr && *env != '\0') ? env : kDefaultRegistryUrl;
   if (!isAllowedGitUrl(url)) {
-    diags.error({}, "SMELT_REGISTRY must be an https:// URL");
+    diags.error({}, "registry URL must be an https:// URL: " + url);
     return std::nullopt;
   }
   return url;
@@ -106,6 +102,10 @@ auto syncRegistry(const fs::path &root, const std::string &commit,
     return std::nullopt;
 
   const fs::path dir = registryDir(root);
+  if (const auto origin = originUrl(dir); !origin || *origin != *url) {
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+  }
   if (!ensureClone(*url, dir)) {
     diags.error({}, "cannot clone registry " + *url);
     return std::nullopt;

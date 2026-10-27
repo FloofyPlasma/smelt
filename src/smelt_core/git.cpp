@@ -92,4 +92,15 @@ auto isFullCommitHash(const std::string &s) -> bool {
          });
 }
 
+auto originUrl(const fs::path &dir) -> std::optional<std::string> {
+  std::error_code ec;
+  if (!fs::exists(dir / ".git", ec))
+    return std::nullopt;
+  const auto out =
+      runCapture({"git", "-C", dir.string(), "remote", "get-url", "origin"});
+  if (!out)
+    return std::nullopt;
+  return trim(*out);
+}
+
 } // namespace smelt

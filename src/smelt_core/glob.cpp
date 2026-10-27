@@ -52,7 +52,7 @@ auto matchSegments(const std::vector<std::string_view> &pat, std::size_t pi,
 
   if (si == path.size())
     return false;
-  if (!matchChars(path[pi], path[si]))
+  if (!matchChars(pat[pi], path[si]))
     return false;
   return matchSegments(pat, pi + 1, path, si + 1);
 }
