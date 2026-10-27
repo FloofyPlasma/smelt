@@ -1,8 +1,0 @@
-project "example" {
-    version = "0.1.0";
-}
-
-target "app" {
-    type = exe;
-    sources = ["main.cpp"];
-}
