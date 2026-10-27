@@ -2,7 +2,15 @@
 
 #include "diagnostics.hpp"
 #include <filesystem>
+#include <string>
 namespace smelt {
+
+struct FetchOptions {
+  bool update = false;
+  std::optional<std::string> name;
+};
+
 [[nodiscard]] auto fetchDependencies(const std::filesystem::path &root,
-                                     Diagnostics &diags) -> bool;
-}
+                                     Diagnostics &diags,
+                                     const FetchOptions &opts = {}) -> bool;
+} // namespace smelt

@@ -20,6 +20,7 @@ namespace {
 struct Options {
   std::string command;
   std::string profile = "debug";
+  std::string updateName;
   std::optional<std::string> target;
   std::vector<std::string> runArgs;
 };
@@ -28,6 +29,7 @@ void usage() {
   std::cerr << "usage:\n"
                "  smelt build [--profile NAME] [--target NAME]\n"
                "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
+               "  smelt update [NAME]\n"
                "  smelt clean\n"
                "  smelt fetch\n"
                "  smelt compdb [--profile NAME]\n";
@@ -37,14 +39,18 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
   if (argc < 2)
     return false;
   o.command = argv[1];
-  if (o.command != "build" && o.command != "run" && o.command != "clean" &&
-      o.command != "fetch" && o.command != "compdb")
+
+  const bool known = o.command == "build" || o.command == "run" ||
+                     o.command == "clean" || o.command == "fetch" ||
+                     o.command == "update" || o.command == "compdb";
+
+  if (!known)
     return false;
 
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--") {
-      for (int j = i + 1; j < argc; j++)
+      for (int j = i + 1; j < argc; ++j)
         o.runArgs.emplace_back(argv[j]);
       break;
     }
@@ -52,11 +58,13 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
       o.profile = argv[++i];
     } else if (arg == "--target" && i + 1 < argc) {
       o.target = argv[++i];
+    } else if (o.command == "update" && !arg.empty() && arg[0] != '-' &&
+               o.updateName.empty()) {
+      o.updateName = arg;
     } else {
       return false;
     }
   }
-
   if (o.command != "run" && !o.runArgs.empty())
     return false;
   return true;
@@ -99,9 +107,13 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  if (opts.command == "fetch") {
+  if (opts.command == "fetch" || opts.command == "update") {
     smelt::Diagnostics fetchDiags("project.smelt");
-    if (!smelt::fetchDependencies(root, fetchDiags)) {
+    smelt::FetchOptions fo;
+    fo.update = opts.command == "update";
+    if (fo.update && !opts.updateName.empty())
+      fo.name = opts.updateName;
+    if (!smelt::fetchDependencies(root, fetchDiags, fo)) {
       printDiagnostics(fetchDiags);
       return 1;
     }
