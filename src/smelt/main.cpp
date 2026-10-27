@@ -6,6 +6,7 @@
 #include "install.hpp"
 #include "process.hpp"
 #include "sema.hpp"
+#include "tools.hpp"
 #include "workspace.hpp"
 #include <algorithm>
 #include <chrono>
@@ -111,6 +112,17 @@ void printOutput(const smelt::TargetInfo &t, const fs::path &out,
   const std::string kind = t.type == smelt::TargetType::Exe ? "exe" : "lib";
   std::cout << "  " << kind << "  " << fs::relative(out, root).string() << "\n";
 }
+
+std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps) {
+  std::vector<std::string> tools;
+  if (o.command == "build" || o.command == "run" || o.command == "install") {
+    tools = {"clang", "clang++", "ar"};
+  }
+  if (o.command == "fetch" || o.command == "update" || hasRemoteDeps) {
+    tools.push_back("git");
+  }
+  return tools;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -148,11 +160,15 @@ int main(int argc, char **argv) {
       std::cerr << "smelt: HOME is not set; use --prefix\n";
       return 2;
     }
+    if (!smelt::requireTools(toolsFor(opts, false)))
+      return 2;
     return opts.command == "install" ? smelt::installSelf(root, prefix)
                                      : smelt::uninstallSelf(prefix);
   }
 
   if (opts.command == "fetch" || opts.command == "update") {
+    if (!smelt::requireTools(toolsFor(opts, true)))
+      return 2;
     smelt::Diagnostics fetchDiags("project.smelt");
     smelt::FetchOptions fo;
     fo.update = opts.command == "update";
@@ -171,6 +187,15 @@ int main(int argc, char **argv) {
     printDiagnostics(diags);
     return 1;
   }
+  bool hasRemote = false;
+  for (const auto &pkg : ws->packages) {
+    for (const auto &dep : pkg.model.dependencies) {
+      if (dep.git || dep.registry)
+        hasRemote = true;
+    }
+  }
+  if (!smelt::requireTools(toolsFor(opts, hasRemote)))
+    return 2;
 
   std::optional<smelt::ProfileInfo> profile;
   for (const auto &p : ws->packages[0].model.profiles) {
