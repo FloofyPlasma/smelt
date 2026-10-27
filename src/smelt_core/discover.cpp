@@ -39,6 +39,8 @@ auto discoverSources(const Model &model,
   bool ok = true;
 
   for (const auto &t : model.targets) {
+    if (t.type == TargetType::System)
+      continue;
     const std::string rootRel = t.sourceDir.value_or("src/" + t.name);
     const fs::path root = projectRoot / rootRel;
 

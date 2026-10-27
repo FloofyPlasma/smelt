@@ -413,6 +413,7 @@ private:
       auto arg = parseValue();
       if (!arg)
         return std::nullopt;
+      v.items.push_back(std::move(*arg));
 
       if (accept(TokenKind::RParen))
         return v;

@@ -40,10 +40,18 @@ auto validName(const std::string &s) -> bool {
 auto dependencySourceError(const DependencyInfo &info) -> std::string {
   const std::string who = "dependency '" + info.name + "'";
   const int sources = int(!info.path.empty()) + int(info.git.has_value()) +
-                      int(info.registry.has_value());
+                      int(info.registry.has_value()) +
+                      int(!info.pkgConfig.empty());
 
   if (sources != 1)
-    return who + " needs exactly one of 'path', 'git', or 'registry'";
+    return who + " needs exactly one of 'path', 'git', 'registry', or 'find'";
+
+  if (!info.pkgConfig.empty()) {
+    if (info.tag || info.commit || info.version)
+      return who +
+             ": 'find' cannot be combined with 'tag', 'commit', or 'version'";
+    return {};
+  }
 
   if (info.registry) {
     if (!validName(*info.registry))
@@ -402,8 +410,8 @@ private:
           if (auto s = asString(a))
             info.target = *s;
         } else if (a.key == "find") {
-          error(a.loc, "dependency source 'find' is not supported yet; use "
-                       "'path', 'git' or 'registry'");
+          if (auto names = checkFind(a))
+            info.pkgConfig = std::move(*names);
         } else {
           unknownKey(a, "dependency");
         }
@@ -417,6 +425,55 @@ private:
     }
 
     return out;
+  }
+
+  auto pkgConfigName(const Value &call) -> std::optional<std::string> {
+    if (call.items.size() != 1 || call.items[0].kind != Value::Kind::String) {
+      error(call.loc, "pkg_config() takes one quoted package name");
+      return std::nullopt;
+    }
+    if (call.items[0].text.empty()) {
+      error(call.loc, "pkg_config() package name must not be empty");
+      return std::nullopt;
+    }
+    return call.items[0].text;
+  }
+
+  auto checkFind(const Assign &a) -> std::optional<std::vector<std::string>> {
+    const Value &v = a.value;
+    if (v.kind != Value::Kind::Call) {
+      error(v.loc, "'find' must be pkg_config(...) or first(...)");
+      return std::nullopt;
+    }
+
+    if (v.text == "pkg_config") {
+      auto name = pkgConfigName(v);
+      if (!name)
+        return std::nullopt;
+      return std::vector<std::string>{*name};
+    }
+
+    if (v.text != "first") {
+      error(v.loc, "unknown provider '" + v.text + "' in 'find'");
+      return std::nullopt;
+    }
+    if (v.items.empty()) {
+      error(v.loc, "first() needs at least one provider");
+      return std::nullopt;
+    }
+
+    std::vector<std::string> names;
+    for (const auto &item : v.items) {
+      if (item.kind != Value::Kind::Call || item.text != "pkg_config") {
+        error(item.loc, "first() takes only pkg_config(...) providers");
+        return std::nullopt;
+      }
+      auto name = pkgConfigName(item);
+      if (!name)
+        return std::nullopt;
+      names.push_back(*name);
+    }
+    return names;
   }
 
   void checkPlatformBlock(const OnBlock &block, TargetInfo &t) {

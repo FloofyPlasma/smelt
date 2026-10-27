@@ -16,7 +16,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang git
+          sudo apt-get install -y clang git pkg-config
 
       - name: Show toolchain
         run: |
@@ -39,7 +39,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang git
+          sudo apt-get install -y clang git pkg-config
 
       - name: Run network test
         run: tests/run-all.sh network
