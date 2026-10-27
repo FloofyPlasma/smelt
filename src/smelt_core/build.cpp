@@ -286,7 +286,7 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   const std::string owner = p.model.project.name + ":" + t.name;
 
   for (const auto &d : t.publicIncludes)
-    u.includes.push_back((p.root / d).string());
+    u.includes.push_back((p.root / d).lexically_normal().string());
 
   for (const auto &raw : t.defines) {
     BuildDefine def = parseDefine(raw, owner, 3);
@@ -313,9 +313,10 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   const TargetInfo &t = target(n);
 
   Usage u;
-  u.includes.push_back(sources_[n.first].at(n.second).root.string());
+  u.includes.push_back(
+      sources_[n.first].at(n.second).root.lexically_normal().string());
   for (const auto &d : t.privateIncludes)
-    u.includes.push_back((p.root / d).string());
+    u.includes.push_back((p.root / d).lexically_normal().string());
 
   for (const auto &raw : profile_.defines) {
     u.defines.push_back(parseDefine(raw, "profile " + profile_.name, 1));
