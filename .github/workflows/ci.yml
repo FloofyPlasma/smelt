@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main, dev]
   pull_request:
   schedule:
     - cron: "0 6 * * 1"
@@ -42,4 +43,3 @@ jobs:
 
       - name: Run network test
         run: tests/run-all.sh network
-
