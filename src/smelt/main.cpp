@@ -7,6 +7,7 @@
 #include "process.hpp"
 #include "sema.hpp"
 #include "tools.hpp"
+#include "tree.hpp"
 #include "workspace.hpp"
 #include <algorithm>
 #include <chrono>
@@ -46,6 +47,7 @@ void usage() {
                "  smelt uninstall [--prefix DIR]\n"
                "  smelt clean\n"
                "  smelt fetch\n"
+               "  smelt tree\n"
                "  smelt compdb [--profile NAME]\n"
                "  smelt --version\n";
 }
@@ -55,10 +57,10 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     return false;
   o.command = argv[1];
 
-  const bool known = o.command == "build" || o.command == "run" ||
-                     o.command == "clean" || o.command == "fetch" ||
-                     o.command == "update" || o.command == "compdb" ||
-                     o.command == "install" || o.command == "uninstall";
+  const bool known =
+      o.command == "build" || o.command == "run" || o.command == "clean" ||
+      o.command == "fetch" || o.command == "update" || o.command == "compdb" ||
+      o.command == "install" || o.command == "uninstall" || o.command == "tree";
 
   if (argc == 2 && std::string(argv[1]) == "--version") {
     o.command = "version";
@@ -180,6 +182,9 @@ int main(int argc, char **argv) {
     return opts.command == "install" ? smelt::installSelf(root, prefix)
                                      : smelt::uninstallSelf(prefix);
   }
+
+  if (opts.command == "tree")
+    return smelt::printTree(root);
 
   if (opts.command == "fetch" || opts.command == "update") {
     if (!smelt::requireTools(toolsFor(opts, true)))
