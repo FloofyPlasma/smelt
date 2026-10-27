@@ -23,4 +23,5 @@ target "smelt_core" {
 target "smelt" {
     type = exe;
     depends = ["smelt_core"];
+    link = ["-pthread"];
 }

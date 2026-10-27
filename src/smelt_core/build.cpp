@@ -4,15 +4,20 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstddef>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -126,6 +131,97 @@ void writeSignature(const fs::path &sig, const std::string &sigText) {
   out << sigText;
 }
 
+void printLog(const fs::path &log, std::mutex &out) {
+  const auto text = readText(log);
+  if (!text || text->empty())
+    return;
+  std::lock_guard lock(out);
+  std::cerr << *text;
+}
+
+bool runCompile(const std::vector<std::string> &args, const fs::path &obj,
+                const fs::path &dep, const fs::path &sig,
+                const std::string &sigText, const fs::path &source,
+                const std::string &label, std::mutex &out) {
+  const fs::path log = fs::path(obj.string() + ".log");
+
+  const auto deps = readDepFile(dep);
+  std::vector<fs::path> inputs{source};
+  if (deps) {
+    for (const auto &d : *deps)
+      inputs.emplace_back(d);
+  }
+  if (deps && !isStale(obj, sig, sigText, inputs)) {
+    printLog(log, out);
+    return true;
+  }
+
+  fs::create_directories(obj.parent_path());
+  fs::remove(sig);
+
+  {
+    std::lock_guard lock(out);
+    std::cout << "  " << label << "\n";
+  }
+
+  const int rc = runProcessLogged(args, log.string());
+  printLog(log, out);
+
+  if (rc != 0) {
+    std::lock_guard lock(out);
+    std::cerr << "smelt: compile failed: " << joinCommand(args) << "\n";
+    return false;
+  }
+  writeSignature(sig, sigText);
+  return true;
+}
+
+bool runArchive(const std::vector<std::string> &args, const fs::path &out,
+                const fs::path &sig, const std::string &sigText,
+                const std::vector<fs::path> &objects, const std::string &name,
+                std::mutex &console) {
+  if (!isStale(out, sig, sigText, objects))
+    return true;
+
+  fs::create_directories(out.parent_path());
+  fs::remove(out);
+  fs::remove(sig);
+  {
+    std::lock_guard lock(console);
+    std::cout << "  AR  lib" << name << ".a\n";
+  }
+  if (runProcess(args) != 0) {
+    std::lock_guard lock(console);
+    std::cerr << "smelt: archive failed: " << joinCommand(args) << "\n";
+    return false;
+  }
+  writeSignature(sig, sigText);
+  return true;
+}
+
+bool runLink(const std::vector<std::string> &args, const fs::path &out,
+             const fs::path &sig, const std::string &sigText,
+             const std::vector<fs::path> &inputs, const std::string &name,
+             std::mutex &console) {
+  if (!isStale(out, sig, sigText, inputs))
+    return true;
+
+  fs::create_directories(out.parent_path());
+  fs::remove(out);
+  fs::remove(sig);
+  {
+    std::lock_guard lock(console);
+    std::cout << "  LD  " << name << "\n";
+  }
+  if (runProcess(args) != 0) {
+    std::lock_guard lock(console);
+    std::cerr << "smelt: link failed: " << joinCommand(args) << "\n";
+    return false;
+  }
+  writeSignature(sig, sigText);
+  return true;
+}
+
 void dedupe(std::vector<std::string> &v) {
   std::set<std::string> seen;
   std::vector<std::string> out;
@@ -146,8 +242,8 @@ auto stdFlag(const ProjectInfo &pr, const bool cxx) -> std::string {
 }
 
 auto parseDefine(const std::string &text, const std::string &source,
-                 const int rank) -> Builder::Define {
-  Builder::Define d;
+                 const int rank) -> BuildDefine {
+  BuildDefine d;
   d.source = source;
   d.rank = rank;
   const std::size_t eq = text.find('=');
@@ -160,6 +256,13 @@ auto parseDefine(const std::string &text, const std::string &source,
   }
   return d;
 }
+
+struct Job {
+  std::function<bool()> run;
+  std::vector<std::size_t> next;
+  std::size_t waiting = 0;
+  bool done = false;
+};
 } // namespace
 
 Builder::Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
@@ -194,7 +297,7 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
     u.includes.push_back((p.root / d).string());
 
   for (const auto &raw : t.defines) {
-    Define def = parseDefine(raw, owner, 3);
+    BuildDefine def = parseDefine(raw, owner, 3);
     u.defines.push_back(std::move(def));
   }
 
@@ -265,6 +368,8 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
       "-MF",
       dep.string(),
       stdFlag(pkg.model.project, src.isCxx),
+      "-Wall",
+      "-Wextra",
   };
 
   switch (profile_.optimization) {
@@ -293,7 +398,7 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
 
 auto Builder::resolveDefines(const Usage &u) const
     -> std::optional<std::vector<std::string>> {
-  std::map<std::string, std::map<std::string, Define>> bySource;
+  std::map<std::string, std::map<std::string, BuildDefine>> bySource;
   std::map<std::string, std::size_t> sourceOrder;
 
   for (const auto &d : u.defines) {
@@ -301,16 +406,17 @@ auto Builder::resolveDefines(const Usage &u) const
     sourceOrder.emplace(d.source, sourceOrder.size());
   }
 
-  std::vector<Define> sourcesFlat;
+  std::vector<BuildDefine> sourcesFlat;
   for (const auto &[source, macros] : bySource) {
     for (const auto &[name, def] : macros)
       sourcesFlat.push_back(def);
   }
-  std::stable_sort(
-      sourcesFlat.begin(), sourcesFlat.end(),
-      [](const Define &a, const Define &b) { return a.rank < b.rank; });
+  std::stable_sort(sourcesFlat.begin(), sourcesFlat.end(),
+                   [](const BuildDefine &a, const BuildDefine &b) {
+                     return a.rank < b.rank;
+                   });
 
-  std::map<std::string, Define> merged;
+  std::map<std::string, BuildDefine> merged;
   std::vector<std::string> order;
   bool ok = true;
 
@@ -337,177 +443,9 @@ auto Builder::resolveDefines(const Usage &u) const
 
   std::vector<std::string> out;
   for (const auto &name : order) {
-    const Define &d = merged.at(name);
+    const BuildDefine &d = merged.at(name);
     out.push_back(d.hasValue ? d.name + "=" + d.value : d.name);
   }
-  return out;
-}
-
-auto Builder::compileOne(const Package &pkg, const SourceFile &src,
-                         const Usage &u, const std::filesystem::path &objDir)
-    -> std::optional<fs::path> {
-  const fs::path obj = objDir / (src.relPath + ".o");
-  const fs::path dep = fs::path(obj.string() + ".d");
-  const fs::path sig = fs::path(obj.string() + ".sig");
-
-  const auto args = compileArgs(pkg, src, u, obj, dep);
-  const std::string sigText = signatureOf(args);
-
-  const auto deps = readDepFile(dep);
-  std::vector<fs::path> inputs{src.path};
-  if (deps) {
-    for (const auto &d : *deps)
-      inputs.emplace_back(d);
-  }
-
-  if (deps && !isStale(obj, sig, sigText, inputs))
-    return obj;
-
-  fs::create_directories(obj.parent_path());
-  fs::remove(sig);
-
-  std::cout << "  " << (src.isCxx ? "CXX " : "CC  ") << pkg.model.project.name
-            << "/" << src.relPath << "\n";
-  if (runProcess(args) != 0) {
-    std::cerr << "smelt: compile failed: " << joinCommand(args) << "\n";
-    return std::nullopt;
-  }
-
-  writeSignature(sig, sigText);
-  return obj;
-}
-
-auto Builder::archive(const std::string &name, const fs::path &dir,
-                      const std::vector<fs::path> &objects)
-    -> std::optional<fs::path> {
-  const fs::path out = dir / ("lib" + name + ".a");
-  const fs::path sig = fs::path(out.string() + ".sig");
-
-  std::vector<std::string> args{"ar", "rcs", out.string()};
-  for (const auto &o : objects)
-    args.push_back(o.string());
-
-  const std::string sigText = signatureOf(args);
-  if (!isStale(out, sig, sigText, objects))
-    return out;
-
-  fs::create_directories(dir);
-  fs::remove(out);
-  fs::remove(sig);
-
-  std::cout << "  AR  lib" << name << ".a\n";
-  if (runProcess(args) != 0) {
-    std::cerr << "smelt: archive failed: " << joinCommand(args) << "\n";
-    return std::nullopt;
-  }
-
-  writeSignature(sig, sigText);
-  return out;
-}
-
-auto Builder::link(const std::string &name, const fs::path &dir,
-                   const std::vector<fs::path> &objects,
-                   const std::vector<fs::path> &archives,
-                   const std::vector<std::string> &flags)
-    -> std::optional<fs::path> {
-  const fs::path out = dir / name;
-  const fs::path sig = fs::path(out.string() + ".sig");
-
-  std::vector<std::string> args{"clang++"};
-  if (profile_.debugInfo)
-    args.push_back("-g");
-  args.push_back("-o");
-  args.push_back(out.string());
-  for (const auto &o : objects)
-    args.push_back(o.string());
-  for (const auto &a : archives)
-    args.push_back(a.string());
-  args.insert(args.end(), flags.begin(), flags.end());
-
-  std::vector<fs::path> inputs = objects;
-  inputs.insert(inputs.end(), archives.begin(), archives.end());
-
-  const std::string sigText = signatureOf(args);
-  if (!isStale(out, sig, sigText, inputs))
-    return out;
-
-  fs::create_directories(dir);
-  fs::remove(out);
-  fs::remove(sig);
-
-  std::cout << "  LD  " << name << "\n";
-  if (runProcess(args) != 0) {
-    std::cerr << "smelt: link failed: " << joinCommand(args) << "\n";
-    return std::nullopt;
-  }
-
-  writeSignature(sig, sigText);
-  return out;
-}
-
-auto Builder::build(const NodeKey &node) -> std::optional<fs::path> {
-  if (const auto it = outputs_.find(node); it != outputs_.end())
-    return it->second;
-
-  if (!active_.insert(node).second) {
-    std::cerr << "smelt: internal error: cycle through target '" << node.second
-              << "'\n";
-    return std::nullopt;
-  }
-
-  const Package &pkg = ws_.packages[node.first];
-  const TargetInfo &t = target(node);
-
-  for (const auto &dep : depsOf(node)) {
-    if (target(dep).type == TargetType::Exe) {
-      std::cerr << "smelt: target '" << t.name << "' depends on exe '"
-                << dep.second
-                << "'; only static_lib targets can be dependencies\n";
-      return std::nullopt;
-    }
-    if (!build(dep))
-      return std::nullopt;
-  }
-
-  const TargetSources &src = sources_[node.first].at(node.second);
-  const Usage reqs = requirementsOf(node);
-  if (!resolveDefines(reqs)) {
-    return std::nullopt;
-  }
-  const fs::path dir = outDir(node);
-  const fs::path objDir = dir / "obj";
-
-  std::vector<fs::path> objects;
-  for (const auto &file : src.files) {
-    const auto obj = compileOne(pkg, file, reqs, objDir);
-    if (!obj)
-      return std::nullopt;
-    objects.push_back(*obj);
-  }
-
-  std::optional<fs::path> out;
-  if (t.type == TargetType::StaticLib) {
-    out = archive(t.name, dir, objects);
-  } else {
-    std::set<NodeKey> seen{node};
-    std::vector<NodeKey> libs;
-    staticLibs(node, seen, libs);
-    std::reverse(libs.begin(), libs.end());
-
-    std::vector<fs::path> archives;
-    for (const auto &lib : libs) {
-      const auto a = build(lib);
-      if (!a)
-        return std::nullopt;
-      archives.push_back(*a);
-    }
-    out = link(t.name, dir, objects, archives, reqs.link);
-  }
-
-  if (!out)
-    return std::nullopt;
-  outputs_[node] = *out;
-  active_.erase(node);
   return out;
 }
 
@@ -554,4 +492,188 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
   return out;
 }
 
+auto Builder::build(const NodeKey &root, const std::size_t jobs)
+    -> std::optional<fs::path> {
+  std::vector<Job> graph;
+  std::map<NodeKey, std::size_t> producer;
+  std::map<NodeKey, fs::path> outputPath;
+  std::set<NodeKey> planned;
+  bool planOk = true;
+
+  std::function<void(const NodeKey &)> plan = [&](const NodeKey &node) {
+    if (!planned.insert(node).second)
+      return;
+    const TargetInfo &t = target(node);
+    for (const auto &dep : depsOf(node)) {
+      if (target(dep).type == TargetType::Exe) {
+        std::cerr << "smelt: target '" << t.name << "' depends on exe '"
+                  << dep.second
+                  << "'; only static_lib targets can be "
+                     "dependencies\n";
+        planOk = false;
+        return;
+      }
+      plan(dep);
+      if (!planOk)
+        return;
+    }
+
+    const Package &pkg = ws_.packages[node.first];
+    const TargetSources &src = sources_[node.first].at(node.second);
+    const Usage reqs = requirementsOf(node);
+    const auto defs = resolveDefines(reqs);
+    if (!defs) {
+      planOk = false;
+      return;
+    }
+    (void)defs;
+
+    const fs::path dir = outDir(node);
+    const fs::path objDir = dir / "obj";
+
+    std::vector<std::size_t> compileJobs;
+    std::vector<fs::path> objects;
+    for (const auto &file : src.files) {
+      const fs::path obj = objDir / (file.relPath + ".o");
+      const fs::path depFile = fs::path(obj.string() + ".d");
+      const fs::path sig = fs::path(obj.string() + ".sig");
+      const auto args = compileArgs(pkg, file, reqs, obj, depFile);
+      const std::string sigText = signatureOf(args);
+      const std::string label = std::string(file.isCxx ? "CXX " : "CC  ") +
+                                pkg.model.project.name + "/" + file.relPath;
+
+      Job j;
+      j.run = [=, &console = console_] {
+        return runCompile(args, obj, depFile, sig, sigText, file.path, label,
+                          console);
+      };
+      graph.push_back(std::move(j));
+      compileJobs.push_back(graph.size() - 1);
+      objects.push_back(obj);
+    }
+
+    std::size_t outJob = 0;
+    if (t.type == TargetType::StaticLib) {
+      const fs::path out = dir / ("lib" + t.name + ".a");
+      const fs::path sig = fs::path(out.string() + ".sig");
+      std::vector<std::string> args{"ar", "rcs", out.string()};
+      for (const auto &o : objects)
+        args.push_back(o.string());
+      const std::string sigText = signatureOf(args);
+
+      Job j;
+      j.run = [=, &console = console_] {
+        return runArchive(args, out, sig, sigText, objects, t.name, console);
+      };
+      graph.push_back(std::move(j));
+      outJob = graph.size() - 1;
+      outputPath[node] = out;
+    } else {
+      std::set<NodeKey> seen{node};
+      std::vector<NodeKey> libs;
+      staticLibs(node, seen, libs);
+      std::reverse(libs.begin(), libs.end());
+
+      std::vector<fs::path> archives;
+      std::vector<std::size_t> libJobs;
+      for (const auto &lib : libs) {
+        archives.push_back(outputPath.at(lib));
+        libJobs.push_back(producer.at(lib));
+      }
+
+      const fs::path out = dir / t.name;
+      const fs::path sig = fs::path(out.string() + ".sig");
+      std::vector<std::string> args{"clang++"};
+      if (profile_.debugInfo)
+        args.push_back("-g");
+      args.push_back("-o");
+      args.push_back(out.string());
+      for (const auto &o : objects)
+        args.push_back(o.string());
+      for (const auto &a : archives)
+        args.push_back(a.string());
+      args.insert(args.end(), reqs.link.begin(), reqs.link.end());
+
+      std::vector<fs::path> inputs = objects;
+      inputs.insert(inputs.end(), archives.begin(), archives.end());
+      const std::string sigText = signatureOf(args);
+
+      Job j;
+      j.run = [=, &console = console_] {
+        return runLink(args, out, sig, sigText, inputs, t.name, console);
+      };
+      graph.push_back(std::move(j));
+      outJob = graph.size() - 1;
+      for (const auto jobIndex : libJobs) {
+        graph[outJob].waiting++;
+        graph[jobIndex].next.push_back(outJob);
+      }
+      outputPath[node] = out;
+    }
+
+    for (const auto c : compileJobs) {
+      graph[outJob].waiting++;
+      graph[c].next.push_back(outJob);
+    }
+    producer[node] = outJob;
+  };
+
+  plan(root);
+  if (!planOk)
+    return std::nullopt;
+
+  std::mutex mu;
+  std::condition_variable cv;
+  std::deque<std::size_t> ready;
+  std::size_t finished = 0;
+  bool failed = false;
+
+  for (std::size_t i = 0; i < graph.size(); ++i) {
+    if (graph[i].waiting == 0)
+      ready.push_back(i);
+  }
+
+  auto worker = [&] {
+    while (true) {
+      std::size_t job = 0;
+      {
+        std::unique_lock lock(mu);
+        cv.wait(lock, [&] {
+          return !ready.empty() || finished == graph.size() || failed;
+        });
+        if (failed || (ready.empty() && finished == graph.size()))
+          return;
+        if (ready.empty())
+          continue;
+        job = ready.front();
+        ready.pop_front();
+      }
+
+      const bool ok = graph[job].run();
+
+      std::lock_guard lock(mu);
+      ++finished;
+      if (!ok) {
+        failed = true;
+      } else {
+        for (const auto next : graph[job].next) {
+          if (--graph[next].waiting == 0)
+            ready.push_back(next);
+        }
+      }
+      cv.notify_all();
+    }
+  };
+
+  const std::size_t n = std::max<std::size_t>(1, jobs);
+  std::vector<std::thread> pool;
+  for (std::size_t i = 0; i < n; ++i)
+    pool.emplace_back(worker);
+  for (auto &th : pool)
+    th.join();
+
+  if (failed)
+    return std::nullopt;
+  return outputPath.at(root);
+}
 } // namespace smelt

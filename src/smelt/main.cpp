@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -23,11 +24,13 @@ struct Options {
   std::string updateName;
   std::optional<std::string> target;
   std::vector<std::string> runArgs;
+  std::size_t jobs =
+      std::max<std::size_t>(1, std::thread::hardware_concurrency());
 };
 
 void usage() {
   std::cerr << "usage:\n"
-               "  smelt build [--profile NAME] [--target NAME]\n"
+               "  smelt build [--profile NAME] [--target NAME] [--jobs N]\n"
                "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
                "  smelt update [NAME]\n"
                "  smelt clean\n"
@@ -56,6 +59,16 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     }
     if (arg == "--profile" && i + 1 < argc) {
       o.profile = argv[++i];
+    } else if ((arg == "--jobs" && i + 1 < argc) &&
+               (o.command == "build" || o.command == "run")) {
+      const std::string value = argv[++i];
+      try {
+        o.jobs = std::stoul(value);
+      } catch (const std::exception &) {
+        return false;
+      }
+      if (o.jobs == 0)
+        return false;
     } else if (arg == "--target" && i + 1 < argc) {
       o.target = argv[++i];
     } else if (o.command == "update" && !arg.empty() && arg[0] != '-' &&
@@ -178,11 +191,11 @@ int main(int argc, char **argv) {
         std::cerr << "smelt: unknown target '" << *opts.target << "'\n";
         return 1;
       }
-      if (!builder.build(smelt::NodeKey{0, *opts.target}))
+      if (!builder.build(smelt::NodeKey{0, *opts.target}, opts.jobs))
         return 1;
     } else {
       for (const auto &t : rootTargets) {
-        if (!builder.build(smelt::NodeKey{0, t.name}))
+        if (!builder.build(smelt::NodeKey{0, t.name}, opts.jobs))
           return 1;
       }
     }
@@ -215,7 +228,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  const auto exePath = builder.build(smelt::NodeKey{0, name});
+  const auto exePath = builder.build(smelt::NodeKey{0, name}, opts.jobs);
   if (!exePath)
     return 1;
 
