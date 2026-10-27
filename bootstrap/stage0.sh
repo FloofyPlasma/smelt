@@ -27,6 +27,7 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/git.cpp" \
   "$ROOT/src/smelt_core/fetch.cpp" \
   "$ROOT/src/smelt_core/registry.cpp" \
+  "$ROOT/src/smelt_core/compdb.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -o "$OUT/smelt"
 

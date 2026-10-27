@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -507,6 +508,49 @@ auto Builder::build(const NodeKey &node) -> std::optional<fs::path> {
     return std::nullopt;
   outputs_[node] = *out;
   active_.erase(node);
+  return out;
+}
+
+[[nodiscard]] auto
+Builder::compileUnits(const std::vector<std::string> &rootTargets)
+    -> std::optional<std::vector<CompileUnit>> {
+  std::vector<CompileUnit> out;
+  std::set<NodeKey> visited;
+
+  std::function<bool(const NodeKey &)> visit = [&](const NodeKey &node) {
+    if (!visited.insert(node).second)
+      return true;
+
+    for (const auto &dep : depsOf(node)) {
+      if (target(dep).type == TargetType::Exe) {
+        std::cerr << "smelt: target '" << target(node).name
+                  << "' depends on exe '" << dep.second << "'\n";
+        return false;
+      }
+      if (!visit(dep))
+        return false;
+    }
+
+    const Package &pkg = ws_.packages[node.first];
+    const TargetSources &src = sources_[node.first].at(node.second);
+    const Usage reqs = requirementsOf(node);
+    if (!resolveDefines(reqs))
+      return false;
+
+    const fs::path objDir = outDir(node) / "obj";
+    for (const auto &file : src.files) {
+      const fs::path obj = objDir / (file.relPath + ".o");
+      const fs::path dep = fs::path(obj.string() + ".d");
+      out.push_back({ws_.packages[0].root, file.path, obj,
+                     compileArgs(pkg, file, reqs, obj, dep)});
+    }
+    return true;
+  };
+
+  for (const auto &name : rootTargets) {
+    if (!visit({0, name}))
+      return std::nullopt;
+  }
   return out;
 }
 

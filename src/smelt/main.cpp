@@ -1,4 +1,5 @@
 #include "build.hpp"
+#include "compdb.hpp"
 #include "diagnostics.hpp"
 #include "discover.hpp"
 #include "fetch.hpp"
@@ -28,7 +29,8 @@ void usage() {
                "  smelt build [--profile NAME] [--target NAME]\n"
                "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
                "  smelt clean\n"
-               "  smelt fetch\n";
+               "  smelt fetch\n"
+               "  smelt compdb [--profile NAME]\n";
 }
 
 auto parseOptions(int argc, char **argv, Options &o) -> bool {
@@ -36,7 +38,7 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     return false;
   o.command = argv[1];
   if (o.command != "build" && o.command != "run" && o.command != "clean" &&
-      o.command != "fetch")
+      o.command != "fetch" && o.command != "compdb")
     return false;
 
   for (int i = 2; i < argc; ++i) {
@@ -64,6 +66,13 @@ void printDiagnostics(const smelt::Diagnostics &diags) {
   for (const auto &d : diags.items()) {
     std::cerr << smelt::Diagnostics::format(d) << "\n";
   }
+}
+
+std::vector<std::string> rootTargetNames(const smelt::Workspace &ws) {
+  std::vector<std::string> names;
+  for (const auto &t : ws.packages[0].model.targets)
+    names.push_back(t.name);
+  return names;
 }
 } // namespace
 
@@ -137,6 +146,19 @@ int main(int argc, char **argv) {
 
   smelt::Builder builder(*ws, sources, *profile);
   const auto &rootTargets = ws->packages[0].model.targets;
+
+  if (opts.command == "compdb") {
+    const auto units = builder.compileUnits(rootTargetNames(*ws));
+    if (!units)
+      return 1;
+    if (!writeCompileDatabase(root / "compile_commands.json", *units)) {
+      std::cerr << "smelt: cannot write compile_commands.json\n";
+      return 1;
+    }
+    std::cout << "wrote compile_commands.json (" << units->size()
+              << " entries)\n";
+    return 0;
+  }
 
   if (opts.command == "build") {
     if (opts.target) {

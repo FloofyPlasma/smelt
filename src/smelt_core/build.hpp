@@ -14,8 +14,18 @@ public:
   Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
           ProfileInfo profile);
 
+  struct CompileUnit {
+    std::filesystem::path directory;
+    std::filesystem::path file;
+    std::filesystem::path object;
+    std::vector<std::string> arguments;
+  };
+
   [[nodiscard]] auto build(const NodeKey &node)
       -> std::optional<std::filesystem::path>;
+
+  [[nodiscard]] auto compileUnits(const std::vector<std::string> &rootTargets)
+      -> std::optional<std::vector<CompileUnit>>;
 
   struct Define {
     std::string name;
