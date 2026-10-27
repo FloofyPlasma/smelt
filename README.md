@@ -51,6 +51,8 @@ smelt run
 
 Every `.c` and `.cpp` file under a target's source root is compiled. The root is `src/<target name>/` unless `source_dir` is set.
 
+Editor support: [smelt-vim](https://github.com/FloofyPlasma/smelt-vim) provides syntax highlighting for Vim and Neovim.
+
 ## Dependencies
 
 Dependencies can come from a local path, a git repository, or the Smelt registry.
@@ -74,6 +76,7 @@ Run `smelt fetch` once to resolve dependencies and write `smelt.lock`. Commit th
 
 TBD.
 
-## License 
+## License
 
 MIT. See [LICENSE](LICENSE).
+
