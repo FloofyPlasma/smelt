@@ -23,6 +23,8 @@ enum class TokenKind : std::uint8_t {
   RBrace,
   LBracket,
   RBracket,
+  LParen,
+  RParen,
   Semicolon,
   Equals,
   Comma,

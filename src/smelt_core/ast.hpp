@@ -7,7 +7,7 @@
 namespace smelt {
 
 struct Value {
-  enum class Kind : std::uint8_t { String, Integer, Bool, Word, List };
+  enum class Kind : std::uint8_t { String, Integer, Bool, Word, List, Call };
 
   Kind kind = Kind::String;
   SourceLoc loc;

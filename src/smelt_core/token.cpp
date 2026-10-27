@@ -33,6 +33,10 @@ auto tokenKindName(TokenKind kind) -> std::string_view {
     return "'['";
   case TokenKind::RBracket:
     return "']'";
+  case TokenKind::LParen:
+    return "'('";
+  case TokenKind::RParen:
+    return "')'";
   case TokenKind::Semicolon:
     return "';'";
   case TokenKind::Equals:
