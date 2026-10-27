@@ -5,6 +5,7 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -12,6 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -250,7 +252,8 @@ struct Job {
   std::vector<std::size_t> next;
   std::size_t waiting = 0;
   std::string label;
-  bool done = false;
+  std::string target;
+  bool endsTarget = false;
 };
 } // namespace
 
@@ -489,9 +492,13 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
   std::set<NodeKey> planned;
   bool planOk = true;
 
+  if (const auto it = outputs_.find(root); it != outputs_.end())
+    return it->second;
+
   std::function<void(const NodeKey &)> plan = [&](const NodeKey &node) {
-    if (!planned.insert(node).second)
+    if (outputs_.count(node) || !planned.insert(node).second)
       return;
+
     const TargetInfo &t = target(node);
     for (const auto &dep : depsOf(node)) {
       if (target(dep).type == TargetType::Exe) {
@@ -508,6 +515,8 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
     }
 
     const Package &pkg = ws_.packages[node.first];
+    const std::string display =
+        node.first == 0 ? t.name : pkg.model.project.name + "/" + t.name;
     const TargetSources &src = sources_[node.first].at(node.second);
     const Usage reqs = requirementsOf(node);
     const auto defs = resolveDefines(reqs);
@@ -528,14 +537,16 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       const fs::path sig = fs::path(obj.string() + ".sig");
       const auto args = compileArgs(pkg, file, reqs, obj, depFile);
       const std::string sigText = signatureOf(args);
-      const std::string label = std::string(file.isCxx ? "CXX " : "CC  ") +
-                                pkg.model.project.name + "/" + file.relPath;
+      const std::string label = display + ": " +
+                                std::string(file.isCxx ? "CXX " : "CC  ") +
+                                file.relPath;
 
       Job j;
       j.run = [=, &console = console_] {
         return runCompile(args, obj, depFile, sig, sigText, file.path, console);
       };
       j.label = label;
+      j.target = display;
       graph.push_back(std::move(j));
       compileJobs.push_back(graph.size() - 1);
       objects.push_back(obj);
@@ -554,7 +565,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       j.run = [=, &console = console_] {
         return runArchive(args, out, sig, sigText, objects, console);
       };
-      j.label = "AR  lib" + t.name + ".a";
+      j.label = display + ": AR  lib" + t.name + ".a";
+      j.target = display;
+      j.endsTarget = true;
       graph.push_back(std::move(j));
       outJob = graph.size() - 1;
       outputPath[node] = out;
@@ -567,8 +580,10 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       std::vector<fs::path> archives;
       std::vector<std::size_t> libJobs;
       for (const auto &lib : libs) {
-        archives.push_back(outputPath.at(lib));
-        libJobs.push_back(producer.at(lib));
+        archives.push_back(outputPath.count(lib) ? outputPath.at(lib)
+                                                 : outputs_.at(lib));
+        if (producer.count(lib))
+          libJobs.push_back(producer.at(lib));
       }
 
       const fs::path out = dir / t.name;
@@ -592,7 +607,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       j.run = [=, &console = console_] {
         return runLink(args, out, sig, sigText, inputs, console);
       };
-      j.label = "LD  " + t.name;
+      j.label = display + ": LD  " + t.name;
+      j.target = display;
+      j.endsTarget = true;
       graph.push_back(std::move(j));
       outJob = graph.size() - 1;
       for (const auto jobIndex : libJobs) {
@@ -626,6 +643,10 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       ready.push_back(i);
   }
 
+  using Clock = std::chrono::steady_clock;
+  std::map<std::string, Clock::time_point> started;
+  std::map<std::string, bool> builtAny;
+
   auto worker = [&] {
     while (true) {
       std::size_t job = 0;
@@ -640,6 +661,7 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
           continue;
         job = ready.front();
         ready.pop_front();
+        started.emplace(graph[job].target, Clock::now());
       }
 
       console_.startJob(graph[job].label);
@@ -651,7 +673,16 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
         console_.failJob(graph[job].label);
         failed = true;
       } else {
-        console_.finishJob(graph[job].label, outcome == Outcome::Built);
+        const Job &j = graph[job];
+        if (outcome == Outcome::Built)
+          builtAny[j.target] = true;
+        console_.finishJob(j.label, outcome == Outcome::Built);
+        if (j.endsTarget) {
+          const double secs =
+              std::chrono::duration<double>(Clock::now() - started[j.target])
+                  .count();
+          console_.finishTarget(j.target, secs, builtAny[j.target]);
+        }
         for (const auto next : graph[job].next) {
           if (--graph[next].waiting == 0)
             ready.push_back(next);
@@ -672,6 +703,9 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
     return std::nullopt;
 
   console_.finish();
+
+  for (const auto &[node, path] : outputPath)
+    outputs_[node] = path;
 
   return outputPath.at(root);
 }

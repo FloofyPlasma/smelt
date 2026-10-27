@@ -5,7 +5,6 @@
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <filesystem>
-#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -64,5 +63,6 @@ private:
   const std::vector<SourceMap> &sources_;
   ProfileInfo profile_;
   Console console_;
+  std::map<NodeKey, std::filesystem::path> outputs_;
 };
 } // namespace smelt

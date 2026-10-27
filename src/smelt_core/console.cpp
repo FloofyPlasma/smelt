@@ -1,7 +1,9 @@
 #include "console.hpp"
 #include <algorithm>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 namespace smelt {
@@ -67,6 +69,21 @@ void Console::finishJob(const std::string &label, const bool printLine) {
     std::cout << "  " << label << "\n" << std::flush;
   }
   ++done_;
+  drawLocked();
+}
+
+void Console::finishTarget(const std::string &name, double seconds,
+                           bool built) {
+  std::lock_guard lock(mu_);
+  clearLocked();
+  if (built) {
+    std::ostringstream t;
+    t << std::fixed << std::setprecision(1) << seconds;
+    std::cout << "  done " << name << " in " << t.str() << "s\n";
+  } else {
+    std::cout << "  up to date " << name << "\n";
+  }
+  std::cout << std::flush;
   drawLocked();
 }
 

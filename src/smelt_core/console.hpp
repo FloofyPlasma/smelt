@@ -17,7 +17,7 @@ public:
   void startJob(const std::string &label);
 
   void finishJob(const std::string &label, bool printLine);
-
+  void finishTarget(const std::string &name, double seconds, bool built);
   void failJob(const std::string &label);
 
   void finish();
