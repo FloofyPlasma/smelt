@@ -132,13 +132,17 @@ void printOutput(const smelt::TargetInfo &t, const fs::path &out,
   std::cout << "  " << kind << "  " << fs::relative(out, root).string() << "\n";
 }
 
-std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps) {
+std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps,
+                                  bool hasSystem) {
   std::vector<std::string> tools;
   if (o.command == "build" || o.command == "run" || o.command == "install") {
     tools = {"clang", "clang++", "ar"};
   }
   if (o.command == "fetch" || o.command == "update" || hasRemoteDeps) {
     tools.push_back("git");
+  }
+  if (hasSystem) {
+    tools.push_back("pkg-config");
   }
   return tools;
 }
@@ -184,7 +188,7 @@ int main(int argc, char **argv) {
       std::cerr << "smelt: HOME is not set; use --prefix\n";
       return 2;
     }
-    if (!smelt::requireTools(toolsFor(opts, false)))
+    if (!smelt::requireTools(toolsFor(opts, false, false)))
       return 2;
     return opts.command == "install" ? smelt::installSelf(root, prefix)
                                      : smelt::uninstallSelf(prefix);
@@ -194,7 +198,7 @@ int main(int argc, char **argv) {
     return smelt::printTree(root);
 
   if (opts.command == "fetch" || opts.command == "update") {
-    if (!smelt::requireTools(toolsFor(opts, true)))
+    if (!smelt::requireTools(toolsFor(opts, true, false)))
       return 2;
     smelt::Diagnostics fetchDiags("project.smelt");
     smelt::FetchOptions fo;
@@ -215,13 +219,16 @@ int main(int argc, char **argv) {
     return 1;
   }
   bool hasRemote = false;
+  bool hasSystem = false;
   for (const auto &pkg : ws->packages) {
     for (const auto &dep : pkg.model.dependencies) {
       if (dep.git || dep.registry)
         hasRemote = true;
+      if (!dep.pkgConfig.empty())
+        hasSystem = true;
     }
   }
-  if (!smelt::requireTools(toolsFor(opts, hasRemote)))
+  if (!smelt::requireTools(toolsFor(opts, hasRemote, hasSystem)))
     return 2;
 
   std::optional<smelt::ProfileInfo> profile;
