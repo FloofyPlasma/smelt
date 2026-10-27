@@ -24,4 +24,5 @@ target "smelt" {
     type = exe;
     depends = ["smelt_core"];
     link = ["-pthread"];
+    defines = ["SMELT_VERSION=\"0.0.1\""];
 }

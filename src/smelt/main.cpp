@@ -19,6 +19,10 @@
 #include <thread>
 #include <vector>
 
+#ifndef SMELT_VERSION
+#define SMELT_VERSION "unknown"
+#endif
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -42,7 +46,8 @@ void usage() {
                "  smelt uninstall [--prefix DIR]\n"
                "  smelt clean\n"
                "  smelt fetch\n"
-               "  smelt compdb [--profile NAME]\n";
+               "  smelt compdb [--profile NAME]\n"
+               "  smelt --version\n";
 }
 
 auto parseOptions(int argc, char **argv, Options &o) -> bool {
@@ -54,6 +59,11 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
                      o.command == "clean" || o.command == "fetch" ||
                      o.command == "update" || o.command == "compdb" ||
                      o.command == "install" || o.command == "uninstall";
+
+  if (argc == 2 && std::string(argv[1]) == "--version") {
+    o.command = "version";
+    return true;
+  }
 
   if (!known)
     return false;
@@ -132,6 +142,11 @@ int main(int argc, char **argv) {
   if (!parseOptions(argc, argv, opts)) {
     usage();
     return 2;
+  }
+
+  if (opts.command == "version") {
+    std::cout << "smelt " << SMELT_VERSION << "\n";
+    return 0;
   }
 
   const auto started = std::chrono::steady_clock::now();
