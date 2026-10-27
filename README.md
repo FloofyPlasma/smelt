@@ -1,65 +1,79 @@
-# smelt
+# Smelt
 
-A fast, simple build tool for C projects. Inspired by cargo. Just add a `smelt.toml`
+Smelt is a small, declarative build system for C and C++ projects. You describe targets and dependencies in a `project.smelt` file, and Smelt finds the sources, compiles them with Clang, and links the result.
+
 > [!WARNING]
-> Work in progress. Not ready for production use.
+> Smelt is still in early development. The format and command set may change.
 
-## Features
+## Requirements
 
-- Simple TOML manifest
-- Incremental builds with content hashing 
-- Registry, and pkg-config dependency management
-- Lockfile support for dependency pinning
-- Debug/release profiles
-- `compile_commands.json` generation for compatible LSP
+- Linux
+- `clang`, `clang++`, `ar`, and `git` on `PATH`
 
-## Installation
-```bash
-git clone https://github.com/floofyplasma/smelt
-cd smelt
-cc -Isrc -Ivendor $(find src vendor -type f -name '*.c') $(pkg-config --cflags --libs libgit2) -o smelt
-./smelt build
+## Install
+
+Smelt builds itself. On a machine without Smelt, run this from a checkout:
+
+```sh
+bootstrap/install.sh
 ```
 
-## Usage
+The script builds Smelt in three stages and checks that the last two produce identical binaries before installing. The binary goes to `~/.local/bin/smelt`. No root is needed. Use `--prefix DIR` to install somewhere else.
 
-```bash
-smelt init                        # scaffold new project
-smelt build                       # debug build (default)
-smelt build -p release            # release build
-smelt run                         # build and run
-smelt clean                       # remove build artifacts
-smelt update                      # re-resolve dependencies and update lockfile
-smelt add <dependency> <version>  # add registry dependency
-smelt add --pkg-config <name>     # add pkg-config dependency
+Once Smelt is installed:
+
+```sh
+smelt install    # rebuild and replace the installed copy
+smelt uninstall  # remove the installed copy
 ```
+
+Make sure `~/.local/bin` is on your `PATH`. The install prints a note if it is not.
+
+## A first project
+
+```smelt
+project "hello" {
+    version = "0.1.0";
+    cxx_std = 20;
+}
+
+target "app" {
+    type = exe;
+}
+```
+
+Put sources under `src/app`, then run:
+
+```sh
+smelt build
+smelt run
+```
+
+Every `.c` and `.cpp` file under a target's source root is compiled. The root is `src/<target name>/` unless `source_dir` is set.
 
 ## Dependencies
 
-### Registry dependency
+Dependencies can come from a local path, a git repository, or the Smelt registry.
 
-```bash
-smelt add xxhash 0.8.3
-smelt add tomlc17 1.0.0
+```smelt
+dependency "xxhash" {
+    registry = "xxhash";
+    version = "0.8.4";
+    target = "xxhash";
+}
+
+target "app" {
+    type = exe;
+    depends = ["xxhash"];
+}
 ```
 
-Dependencies are cloned to a local cache, built incrementally, and their include paths applied automatically.
+Run `smelt fetch` once to resolve dependencies and write `smelt.lock`. Commit the lock file. Later builds use the locked revisions and do not contact the network. To move a locked dependency to a new version, run `smelt update NAME`.
 
-### pkg-config dependency
+## Contributing
 
-```bash
-smelt add --pkg-config sdl2
-```
+TBD.
 
-Include flags and linker flags are automatically applied.
+## License 
 
-## Roadmap
-
-- [ ] `smelt test` command
-- [ ] Parallel compilation
-- [ ] Local smelt-aware dependencies (`smelt add <path>`)
-- [ ] Build recipes for some popular libs (SDL3, raylib, sqlite, etc.)
-
-## License
-
-MIT, see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).

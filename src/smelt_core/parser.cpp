@@ -1,0 +1,420 @@
+#include "parser.hpp"
+#include "ast.hpp"
+#include "diagnostics.hpp"
+#include "lexer.hpp"
+#include "token.hpp"
+#include <optional>
+#include <stdexcept>
+#include <vector>
+
+namespace smelt {
+namespace {
+class Parser {
+public:
+  Parser(const std::vector<Token> &tokens, Diagnostics &diags, bool sourceFile)
+      : tokens_(tokens), diags_(diags), sourceFile_(sourceFile) {}
+
+  auto parseFile() -> ProjectFile {
+    ProjectFile file;
+
+    while (!check(TokenKind::EndOfFile)) {
+      const std::size_t before = pos_;
+
+      if (check(TokenKind::Invalid)) {
+        advance();
+      } else if (sourceFile_ && !check(TokenKind::KwSource)) {
+        diags_.error(peek().loc,
+                     "source.smelt may contain only a 'source' block");
+        skipDeclaration();
+      } else {
+        switch (peek().kind) {
+        case TokenKind::KwProject:
+          if (auto p = parseProjectDecl())
+            file.projects.push_back(std::move(*p));
+          break;
+        case TokenKind::KwProfile:
+          if (auto p = parseProfileDecl())
+            file.profiles.push_back(std::move(*p));
+          break;
+        case TokenKind::KwTarget:
+          if (auto t = parseTargetDecl())
+            file.targets.push_back(std::move(*t));
+          break;
+        case TokenKind::KwDependency:
+          if (sourceFile_) {
+            diags_.error(peek().loc,
+                         "'dependency' is not allowed in source.smelt");
+            skipDeclaration();
+          } else if (auto d = parseDependencyDecl()) {
+            file.dependencies.push_back(std::move(*d));
+          }
+          break;
+        case TokenKind::KwSource:
+          if (!sourceFile_) {
+            diags_.error(peek().loc,
+                         "'source' is only allowed in source.smelt");
+            skipDeclaration();
+          } else if (auto s = parseSourceDecl()) {
+            file.sources.push_back(std::move(*s));
+          }
+          break;
+        default:
+          diags_.error(peek().loc, "expected a declaration, found " +
+                                       std::string(tokenKindName(peek().kind)));
+          skipDeclaration();
+          break;
+        }
+      }
+
+      if (pos_ == before)
+        advance();
+    }
+
+    if (!sourceFile_ && file.projects.empty() && !diags_.hasErrors())
+      diags_.error({1, 1}, "missing 'project' declaration");
+
+    return file;
+  }
+
+private:
+  [[nodiscard]] auto peek(std::size_t ahead = 0) const -> const Token & {
+    const std::size_t i = pos_ + ahead;
+    return i < tokens_.size() ? tokens_[i] : tokens_.back();
+  }
+
+  auto advance() -> const Token & {
+    const Token &t = peek();
+    if (pos_ + 1 < tokens_.size())
+      ++pos_;
+    return t;
+  }
+
+  [[nodiscard]] static auto isKeyword(TokenKind kind) -> bool {
+    return kind == TokenKind::KwProject || kind == TokenKind::KwProfile ||
+           kind == TokenKind::KwTarget || kind == TokenKind::KwDependency ||
+           kind == TokenKind::KwSource || kind == TokenKind::KwOn ||
+           kind == TokenKind::KwTrue || kind == TokenKind::KwFalse;
+  }
+
+  [[nodiscard]] auto isSettingName() const -> bool {
+    if (check(TokenKind::Identifier))
+      return true;
+    return isKeyword(peek().kind) && peek(1).kind == TokenKind::Equals;
+  }
+
+  [[nodiscard]] auto atDeclaration() const -> bool {
+    return isTopLevelKeyword(peek().kind) && peek(1).kind != TokenKind::Equals;
+  }
+
+  [[nodiscard]] auto check(TokenKind kind) const -> bool {
+    return peek().kind == kind;
+  }
+
+  auto accept(TokenKind kind) -> bool {
+    if (!check(kind))
+      return false;
+    advance();
+    return true;
+  }
+
+  auto expect(TokenKind kind, const char *what) -> bool {
+    if (accept(kind))
+      return true;
+    diags_.error(peek().loc, std::string("expected ") + what + ", found " +
+                                 std::string(tokenKindName(peek().kind)));
+    return false;
+  }
+
+  void skipDeclaration() {
+    while (!check(TokenKind::EndOfFile)) {
+      if (accept(TokenKind::Semicolon))
+        return;
+      if (check(TokenKind::RBrace) || atDeclaration())
+        return;
+      advance();
+    }
+  }
+
+  void skipToBlockEnd() {
+    while (!check(TokenKind::EndOfFile) && !check(TokenKind::RBrace)) {
+      if (atDeclaration())
+        return;
+      advance();
+    }
+  }
+
+  static auto isTopLevelKeyword(TokenKind kind) -> bool {
+    return kind == TokenKind::KwProject || kind == TokenKind::KwProfile ||
+           kind == TokenKind::KwTarget || kind == TokenKind::KwDependency ||
+           kind == TokenKind::KwSource;
+  }
+
+  auto parseProjectDecl() -> std::optional<ProjectDecl> {
+    ProjectDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted project name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!parseAssignBlock(decl.assigns)) {
+      return std::nullopt;
+    }
+    return decl;
+  }
+
+  auto parseProfileDecl() -> std::optional<ProfileDecl> {
+    ProfileDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::Identifier)) {
+      expect(TokenKind::Identifier, "a bare profile name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = std::string(advance().text);
+
+    if (!parseAssignBlock(decl.assigns)) {
+      return std::nullopt;
+    }
+    return decl;
+  }
+
+  auto parseTargetDecl() -> std::optional<TargetDecl> {
+    TargetDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted target name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!expect(TokenKind::LBrace, "'{'")) {
+      skipDeclaration();
+      return std::nullopt;
+    }
+
+    while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
+      if (atDeclaration())
+        break;
+
+      if (check(TokenKind::KwOn)) {
+        if (auto block = parseOnBlock())
+          decl.onBlocks.push_back(std::move(*block));
+      } else if (auto a = parseAssign()) {
+        decl.assigns.push_back(std::move(*a));
+      }
+    }
+
+    if (!expect(TokenKind::RBrace, "'}'"))
+      return std::nullopt;
+    return decl;
+  }
+
+  auto parseDependencyDecl() -> std::optional<DependencyDecl> {
+    DependencyDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted dependency name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!parseAssignBlock(decl.assigns))
+      return std::nullopt;
+    return decl;
+  }
+
+  auto parseSourceDecl() -> std::optional<SourceDecl> {
+    SourceDecl decl;
+    decl.loc = advance().loc;
+
+    if (!check(TokenKind::String)) {
+      expect(TokenKind::String, "a quoted source name");
+      skipDeclaration();
+      return std::nullopt;
+    }
+    decl.name = decodeString(advance().text);
+
+    if (!parseAssignBlock(decl.assigns))
+      return std::nullopt;
+    return decl;
+  }
+
+  auto parseOnBlock() -> std::optional<OnBlock> {
+    OnBlock block;
+    block.loc = advance().loc;
+
+    if (!check(TokenKind::Identifier)) {
+      expect(TokenKind::Identifier, "a platform name");
+      skipToBlockEnd();
+      accept(TokenKind::RBrace);
+      return std::nullopt;
+    }
+    block.platform = std::string(advance().text);
+
+    if (!expect(TokenKind::LBrace, "'{'")) {
+      skipToBlockEnd();
+      accept(TokenKind::RBrace);
+      return std::nullopt;
+    }
+
+    while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
+      if (atDeclaration())
+        break;
+      if (auto a = parseAssign())
+        block.assigns.push_back(std::move(*a));
+    }
+
+    if (!expect(TokenKind::RBrace, "'}'"))
+      return std::nullopt;
+    return block;
+  }
+
+  auto parseAssignBlock(std::vector<Assign> &out) -> bool {
+    if (!expect(TokenKind::LBrace, "'{'")) {
+      skipDeclaration();
+      return false;
+    }
+
+    while (!check(TokenKind::RBrace) && !check(TokenKind::EndOfFile)) {
+      if (atDeclaration())
+        break;
+      if (auto a = parseAssign())
+        out.push_back(std::move(*a));
+    }
+
+    return expect(TokenKind::RBrace, "'}'");
+  }
+
+  auto parseAssign() -> std::optional<Assign> {
+    if (check(TokenKind::Invalid)) {
+      advance();
+      return std::nullopt;
+    }
+
+    if (!isSettingName()) {
+      diags_.error(peek().loc, "expected a setting name, found " +
+                                   std::string(tokenKindName(peek().kind)));
+      skipDeclaration();
+      return std::nullopt;
+    }
+
+    Assign a;
+    a.loc = peek().loc;
+    a.key = std::string(advance().text);
+
+    if (!expect(TokenKind::Equals, "'='")) {
+      skipDeclaration();
+      return std::nullopt;
+    }
+
+    auto value = parseValue();
+    if (!value) {
+      skipDeclaration();
+      return std::nullopt;
+    }
+    a.value = std::move(*value);
+
+    if (!expect(TokenKind::Semicolon, "';' after value")) {
+      skipDeclaration();
+      return std::nullopt;
+    }
+    return a;
+  }
+
+  auto parseValue() -> std::optional<Value> {
+    Value v;
+    v.loc = peek().loc;
+
+    switch (peek().kind) {
+    case TokenKind::String:
+      v.kind = Value::Kind::String;
+      v.text = decodeString(advance().text);
+      return v;
+
+    case TokenKind::Integer: {
+      v.kind = Value::Kind::Integer;
+      const std::string digits(advance().text);
+      try {
+        v.integer = std::stoll(digits);
+      } catch (const std::out_of_range &) {
+        diags_.error(v.loc, "integer out of range: " + digits);
+        return std::nullopt;
+      }
+      return v;
+    }
+
+    case TokenKind::KwTrue:
+    case TokenKind::KwFalse:
+      v.kind = Value::Kind::Bool;
+      v.boolean = advance().kind == TokenKind::KwTrue;
+      return v;
+
+    case TokenKind::Identifier:
+      v.kind = Value::Kind::Word;
+      v.text = std::string(advance().text);
+      return v;
+
+    case TokenKind::LBracket:
+      return parseList(v);
+
+    default:
+      diags_.error(peek().loc, "expected a value, found " +
+                                   std::string(tokenKindName(peek().kind)));
+      return std::nullopt;
+    }
+  }
+
+  auto parseList(Value &v) -> std::optional<Value> {
+    v.kind = Value::Kind::List;
+    advance();
+
+    if (accept(TokenKind::RBracket))
+      return v;
+
+    while (true) {
+      if (!check(TokenKind::String)) {
+        diags_.error(peek().loc, "list items must be quoted strings, found " +
+                                     std::string(tokenKindName(peek().kind)));
+        return std::nullopt;
+      }
+      Value item;
+      item.kind = Value::Kind::String;
+      item.loc = peek().loc;
+      item.text = decodeString(advance().text);
+      v.items.push_back(std::move(item));
+
+      if (accept(TokenKind::RBracket))
+        return v;
+      if (!expect(TokenKind::Comma, "',' or ']' in list"))
+        return std::nullopt;
+    }
+  }
+
+  std::vector<Token> tokens_;
+  Diagnostics &diags_;
+  std::size_t pos_ = 0;
+  bool sourceFile_;
+};
+} // namespace
+
+auto parseProject(const std::vector<Token> &tokens, Diagnostics &diags)
+    -> ProjectFile {
+  Parser parser(tokens, diags, false);
+  return parser.parseFile();
+}
+
+auto parseSourceFile(const std::vector<Token> &tokens, Diagnostics &diags)
+    -> ProjectFile {
+  Parser parser(tokens, diags, true);
+  return parser.parseFile();
+}
+} // namespace smelt
