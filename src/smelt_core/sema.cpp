@@ -329,6 +329,8 @@ private:
         assignList(a, t.privateIncludes);
       } else if (a.key == "defines") {
         assignList(a, t.defines);
+      } else if (a.key == "public_defines") {
+        assignList(a, t.publicDefines);
       } else if (a.key == "compile_options") {
         assignList(a, t.compileOptions);
       } else if (a.key == "link") {
