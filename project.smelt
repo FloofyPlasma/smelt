@@ -1,5 +1,5 @@
 project "smelt" {
-    version = "2.1.0-dev";
+    version = "2.1.0";
     cxx_std = 20;
     c_std = 17;
 }
@@ -25,5 +25,5 @@ target "smelt" {
     warnings = all;
     depends = ["smelt_core"];
     link = ["-pthread"];
-    defines = ["SMELT_VERSION=\"2.1.0-dev\""];
+    defines = ["SMELT_VERSION=\"2.1.0\""];
 }
