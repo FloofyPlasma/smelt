@@ -3,6 +3,7 @@
 #include "diagnostics.hpp"
 #include "discover.hpp"
 #include "fetch.hpp"
+#include "init.hpp"
 #include "install.hpp"
 #include "process.hpp"
 #include "sema.hpp"
@@ -50,6 +51,7 @@ void usage(bool toStdout = false) {
          "  smelt fetch\n"
          "  smelt tree\n"
          "  smelt check\n"
+         "  smelt init\n"
          "  smelt compdb [--profile NAME]\n"
          "  smelt --version\n";
 }
@@ -59,11 +61,11 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     return false;
   o.command = argv[1];
 
-  const bool known = o.command == "build" || o.command == "run" ||
-                     o.command == "clean" || o.command == "fetch" ||
-                     o.command == "update" || o.command == "compdb" ||
-                     o.command == "install" || o.command == "uninstall" ||
-                     o.command == "tree" || o.command == "check";
+  const bool known =
+      o.command == "build" || o.command == "run" || o.command == "clean" ||
+      o.command == "fetch" || o.command == "update" || o.command == "compdb" ||
+      o.command == "install" || o.command == "uninstall" ||
+      o.command == "tree" || o.command == "check" || o.command == "init";
 
   if (argc == 2 && std::string(argv[1]) == "--version") {
     o.command = "version";
@@ -211,6 +213,11 @@ int main(int argc, char **argv) {
     }
     std::cout << "ok: project '" << model->project.name << "'\n";
     return 0;
+  }
+
+  if (opts.command == "init") {
+    return smelt::initProject(root, root.filename().string(), std::cin,
+                              std::cout);
   }
 
   if (opts.command == "fetch" || opts.command == "update") {
