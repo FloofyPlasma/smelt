@@ -38,8 +38,10 @@ public:
 private:
   struct Usage {
     std::vector<std::string> includes;
+    std::vector<std::string> systemIncludes;
     std::vector<BuildDefine> defines;
     std::vector<std::string> options;
+    std::vector<std::string> warnings;
     std::vector<std::string> link;
   };
 

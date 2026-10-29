@@ -3,9 +3,9 @@
 #include "lock.hpp"
 #include "registry.hpp"
 #include "workspace.hpp"
+#include <algorithm>
 #include <iostream>
 #include <map>
-#include <optional>
 #include <set>
 #include <string>
 #include <system_error>
@@ -24,6 +24,38 @@ struct Visit {
 auto sameDeclaration(const LockEntry &a, const LockEntry &b) -> bool {
   return a.kind == b.kind && a.url == b.url && a.refKind == b.refKind &&
          a.ref == b.ref;
+}
+
+auto sparsePaths(const Model &m) -> std::vector<std::string> {
+  std::vector<std::string> out;
+  auto add = [&](const std::string &p) -> bool {
+    const std::string norm = fs::path(p).lexically_normal().generic_string();
+    if (norm == "." || norm.empty())
+      return false; // the whole tree is needed
+    out.push_back("/" + norm + "/");
+    return true;
+  };
+
+  for (const auto &t : m.targets) {
+    if (t.type == TargetType::System)
+      continue;
+    if (!add(t.sourceDir.value_or("src/" + t.name)))
+      return {};
+    for (const auto &p : t.publicIncludes)
+      if (!add(p))
+        return {};
+    for (const auto &p : t.privateIncludes)
+      if (!add(p))
+        return {};
+  }
+  for (const auto &d : m.dependencies) {
+    if (!d.path.empty() && !add(d.path))
+      return {};
+  }
+
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
 }
 
 class Fetcher {
@@ -73,6 +105,8 @@ public:
 
       for (const auto &dep : model->dependencies) {
         diags_.setFile(v.file.string());
+        if (!dep.pkgConfig.empty())
+          continue;
         if (opts_.name && dep.name == *opts_.name)
           sawName_ = true;
 
@@ -115,10 +149,36 @@ private:
     return false;
   }
 
-  auto restore(SourceLoc loc, const std::string &name, const std::string &url,
-               const fs::path &dir, const std::string &commit) -> bool {
-    if (!ensureClone(url, dir) || !checkoutCommit(dir, commit)) {
-      diags_.error(loc, "cannot restore '" + name + "' at " + commit);
+  auto materializeGit(SourceLoc loc, const std::string &name,
+                      const std::string &url, const fs::path &dir,
+                      const std::string &commit) -> bool {
+    if (!fetchHistory(url, dir, commit) ||
+        !checkoutPaths(dir, commit, {"/project.smelt"})) {
+      diags_.error(loc, "cannot fetch '" + name + "' at " + commit);
+      return false;
+    }
+
+    const auto model = loadModel(dir / "project.smelt", diags_);
+    if (!model)
+      return false;
+
+    auto paths = sparsePaths(*model);
+    if (!paths.empty())
+      paths.push_back("/project.smelt");
+    if (!checkoutPaths(dir, commit, paths)) {
+      diags_.error(loc, "cannot check out '" + name + "' at " + commit);
+      return false;
+    }
+    return true;
+  }
+
+  auto materializeRegistry(SourceLoc loc, const std::string &name,
+                           const std::string &url, const fs::path &dir,
+                           const std::string &commit, const Model &overlay)
+      -> bool {
+    if (!fetchHistory(url, dir, commit) ||
+        !checkoutPaths(dir, commit, sparsePaths(overlay))) {
+      diags_.error(loc, "cannot fetch '" + name + "' at " + commit);
       return false;
     }
     return true;
@@ -146,7 +206,8 @@ private:
                                   "' is declared differently in two projects");
         return false;
       }
-      return restore(dep.loc, dep.name, want.url, dir, it->second.commit);
+      return materializeGit(dep.loc, dep.name, want.url, dir,
+                            it->second.commit);
     }
 
     if (inScope(dep.name)) {
@@ -155,32 +216,25 @@ private:
     } else if (const auto it = existing_.entries.find(dep.name);
                it != existing_.entries.end()) {
       if (!sameDeclaration(it->second, want)) {
-        diags_.error(dep.loc,
-                     "dependency '" + dep.name +
-                         "' does not match smelt.lock; run 'smelt update " +
-                         dep.name + "' to move it");
+        diags_.error(dep.loc, "dependency '" + dep.name +
+                                  "' does not match smelt.lock; run 'smelt "
+                                  "update " +
+                                  dep.name + "' to move it");
         return false;
       }
-      return restore(dep.loc, dep.name, want.url, dir, it->second.commit);
-    }
-
-    if (!ensureClone(want.url, dir)) {
-      diags_.error(dep.loc, "cannot fetch '" + dep.name + "' from " + want.url);
-      return false;
+      return materializeGit(dep.loc, dep.name, want.url, dir,
+                            it->second.commit);
     }
 
     const std::optional<std::string> commit =
-        dep.tag ? resolveTag(dir, *dep.tag)
+        dep.tag ? remoteTagCommit(want.url, *dep.tag)
                 : std::optional<std::string>(*dep.commit);
     if (!commit) {
       diags_.error(dep.loc, "cannot resolve '" + dep.name + "' in " + want.url);
       return false;
     }
-    if (!checkoutCommit(dir, *commit)) {
-      diags_.error(dep.loc,
-                   "cannot check out " + *commit + " for '" + dep.name + "'");
+    if (!materializeGit(dep.loc, dep.name, want.url, dir, *commit))
       return false;
-    }
 
     want.commit = *commit;
     newEntries_[dep.name] = want;
@@ -200,6 +254,9 @@ private:
         readRegistryEntry(registryDir(root_), dep.name, *dep.version, diags_);
     if (!entry)
       return std::nullopt;
+    const auto overlay = loadModel(entry->overlayFile, diags_);
+    if (!overlay)
+      return std::nullopt;
 
     LockEntry want;
     want.kind = "registry";
@@ -215,7 +272,8 @@ private:
                                   "' is declared differently in two projects");
         return std::nullopt;
       }
-      if (!restore(dep.loc, dep.name, want.url, dir, want.commit))
+      if (!materializeRegistry(dep.loc, dep.name, want.url, dir, want.commit,
+                               *overlay))
         return std::nullopt;
       return entry->overlayFile;
     }
@@ -227,19 +285,21 @@ private:
                it != existing_.entries.end()) {
       if (!sameDeclaration(it->second, want) ||
           it->second.commit != want.commit) {
-        diags_.error(dep.loc,
-                     "registry entry for '" + dep.name +
-                         "' differs from smelt.lock; run 'smelt update " +
-                         dep.name + "' to move it");
+        diags_.error(dep.loc, "registry entry for '" + dep.name +
+                                  "' differs from smelt.lock; run 'smelt "
+                                  "update " +
+                                  dep.name + "' to move it");
         return std::nullopt;
       }
-      if (!restore(dep.loc, dep.name, want.url, dir, want.commit))
+      if (!materializeRegistry(dep.loc, dep.name, want.url, dir, want.commit,
+                               *overlay))
         return std::nullopt;
       return entry->overlayFile;
     }
 
     newEntries_[dep.name] = want;
-    if (!restore(dep.loc, dep.name, want.url, dir, want.commit))
+    if (!materializeRegistry(dep.loc, dep.name, want.url, dir, want.commit,
+                             *overlay))
       return std::nullopt;
     return entry->overlayFile;
   }

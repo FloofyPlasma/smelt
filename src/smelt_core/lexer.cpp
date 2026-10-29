@@ -128,6 +128,10 @@ auto Lexer::lexToken() -> Token {
     return make(TokenKind::LBracket, start, loc);
   case ']':
     return make(TokenKind::RBracket, start, loc);
+  case '(':
+    return make(TokenKind::LParen, start, loc);
+  case ')':
+    return make(TokenKind::RParen, start, loc);
   case ';':
     return make(TokenKind::Semicolon, start, loc);
   case '=':

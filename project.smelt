@@ -1,5 +1,5 @@
 project "smelt" {
-    version = "2.0.0";
+    version = "2.1.0";
     cxx_std = 20;
     c_std = 17;
 }
@@ -22,7 +22,8 @@ target "smelt_core" {
 
 target "smelt" {
     type = exe;
+    warnings = all;
     depends = ["smelt_core"];
     link = ["-pthread"];
-    defines = ["SMELT_VERSION=\"2.0.0\""];
+    defines = ["SMELT_VERSION=\"2.1.0\""];
 }

@@ -359,6 +359,8 @@ private:
       return v;
 
     case TokenKind::Identifier:
+      if (peek(1).kind == TokenKind::LParen)
+        return parseCall(v);
       v.kind = Value::Kind::Word;
       v.text = std::string(advance().text);
       return v;
@@ -395,6 +397,27 @@ private:
       if (accept(TokenKind::RBracket))
         return v;
       if (!expect(TokenKind::Comma, "',' or ']' in list"))
+        return std::nullopt;
+    }
+  }
+
+  auto parseCall(Value &v) -> std::optional<Value> {
+    v.kind = Value::Kind::Call;
+    v.text = std::string(advance().text);
+    advance();
+
+    if (accept(TokenKind::RParen))
+      return v;
+
+    while (true) {
+      auto arg = parseValue();
+      if (!arg)
+        return std::nullopt;
+      v.items.push_back(std::move(*arg));
+
+      if (accept(TokenKind::RParen))
+        return v;
+      if (!expect(TokenKind::Comma, "',' or ')' in call"))
         return std::nullopt;
     }
   }

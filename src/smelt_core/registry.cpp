@@ -102,30 +102,18 @@ auto syncRegistry(const fs::path &root, const std::string &commit,
     return std::nullopt;
 
   const fs::path dir = registryDir(root);
-  if (const auto origin = originUrl(dir); !origin || *origin != *url) {
-    std::error_code ec;
-    fs::remove_all(dir, ec);
-  }
-  if (!ensureClone(*url, dir)) {
-    diags.error({}, "cannot clone registry " + *url);
-    return std::nullopt;
-  }
 
   std::string target = commit;
   if (target.empty()) {
-    if (runProcess({"git", "-C", dir.string(), "fetch", "-q", "origin"}) != 0) {
-      diags.error({}, "cannot update registry " + *url);
+    const auto head = runCapture({"git", "ls-remote", *url, "HEAD"}, true);
+    if (!head || head->size() < 40) {
+      diags.error({}, "cannot read the default branch of " + *url);
       return std::nullopt;
     }
-    const auto head = resolveTag(dir, "origin/HEAD");
-    if (!head) {
-      diags.error({}, "registry has no default branch");
-      return std::nullopt;
-    }
-    target = *head;
+    target = head->substr(0, 40);
   }
 
-  if (!checkoutCommit(dir, target)) {
+  if (!fetchHistory(*url, dir, target) || !checkoutPaths(dir, target, {})) {
     diags.error({}, "cannot check out registry commit " + target);
     return std::nullopt;
   }

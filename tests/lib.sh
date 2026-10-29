@@ -23,6 +23,10 @@ make_tmp() {
 
 fail() {
     echo "FAIL: $*" >&2
+    if [ -n "$TMP" ] && [ -f "$TMP/out" ]; then
+        echo "--- output of the last command ---" >&2
+        sed 's/^/    /' "$TMP/out" >&2
+    fi
     exit 1
 }
 

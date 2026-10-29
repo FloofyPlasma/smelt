@@ -3,6 +3,7 @@
 #include "diagnostics.hpp"
 #include "discover.hpp"
 #include "fetch.hpp"
+#include "init.hpp"
 #include "install.hpp"
 #include "process.hpp"
 #include "sema.hpp"
@@ -49,6 +50,8 @@ void usage(bool toStdout = false) {
          "  smelt clean\n"
          "  smelt fetch\n"
          "  smelt tree\n"
+         "  smelt check\n"
+         "  smelt init\n"
          "  smelt compdb [--profile NAME]\n"
          "  smelt --version\n";
 }
@@ -61,7 +64,8 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
   const bool known =
       o.command == "build" || o.command == "run" || o.command == "clean" ||
       o.command == "fetch" || o.command == "update" || o.command == "compdb" ||
-      o.command == "install" || o.command == "uninstall" || o.command == "tree";
+      o.command == "install" || o.command == "uninstall" ||
+      o.command == "tree" || o.command == "check" || o.command == "init";
 
   if (argc == 2 && std::string(argv[1]) == "--version") {
     o.command = "version";
@@ -75,6 +79,9 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
   }
 
   if (!known)
+    return false;
+
+  if (o.command == "check" && argc != 2)
     return false;
 
   for (int i = 2; i < argc; ++i) {
@@ -132,13 +139,17 @@ void printOutput(const smelt::TargetInfo &t, const fs::path &out,
   std::cout << "  " << kind << "  " << fs::relative(out, root).string() << "\n";
 }
 
-std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps) {
+std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps,
+                                  bool hasSystem) {
   std::vector<std::string> tools;
   if (o.command == "build" || o.command == "run" || o.command == "install") {
     tools = {"clang", "clang++", "ar"};
   }
   if (o.command == "fetch" || o.command == "update" || hasRemoteDeps) {
     tools.push_back("git");
+  }
+  if (hasSystem) {
+    tools.push_back("pkg-config");
   }
   return tools;
 }
@@ -184,7 +195,7 @@ int main(int argc, char **argv) {
       std::cerr << "smelt: HOME is not set; use --prefix\n";
       return 2;
     }
-    if (!smelt::requireTools(toolsFor(opts, false)))
+    if (!smelt::requireTools(toolsFor(opts, false, false)))
       return 2;
     return opts.command == "install" ? smelt::installSelf(root, prefix)
                                      : smelt::uninstallSelf(prefix);
@@ -193,8 +204,24 @@ int main(int argc, char **argv) {
   if (opts.command == "tree")
     return smelt::printTree(root);
 
+  if (opts.command == "check") {
+    smelt::Diagnostics diags("project.smelt");
+    const auto model = smelt::loadModel(root / projectFile, diags);
+    if (!model) {
+      printDiagnostics(diags);
+      return 1;
+    }
+    std::cout << "ok: project '" << model->project.name << "'\n";
+    return 0;
+  }
+
+  if (opts.command == "init") {
+    return smelt::initProject(root, root.filename().string(), std::cin,
+                              std::cout);
+  }
+
   if (opts.command == "fetch" || opts.command == "update") {
-    if (!smelt::requireTools(toolsFor(opts, true)))
+    if (!smelt::requireTools(toolsFor(opts, true, false)))
       return 2;
     smelt::Diagnostics fetchDiags("project.smelt");
     smelt::FetchOptions fo;
@@ -208,6 +235,19 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  bool rootHasSystem = false;
+  {
+    smelt::Diagnostics pre("project.smelt");
+    if (const auto m = smelt::loadModel(root / projectFile, pre)) {
+      for (const auto &dep : m->dependencies) {
+        if (!dep.pkgConfig.empty())
+          rootHasSystem = true;
+      }
+    }
+  }
+  if (rootHasSystem && !smelt::requireTools({"pkg-config"}))
+    return 2;
+
   smelt::Diagnostics diags("project.smelt");
   auto ws = smelt::Workspace::load(root, diags);
   if (!ws) {
@@ -215,13 +255,16 @@ int main(int argc, char **argv) {
     return 1;
   }
   bool hasRemote = false;
+  bool hasSystem = false;
   for (const auto &pkg : ws->packages) {
     for (const auto &dep : pkg.model.dependencies) {
       if (dep.git || dep.registry)
         hasRemote = true;
+      if (!dep.pkgConfig.empty())
+        hasSystem = true;
     }
   }
-  if (!smelt::requireTools(toolsFor(opts, hasRemote)))
+  if (!smelt::requireTools(toolsFor(opts, hasRemote, hasSystem)))
     return 2;
 
   std::optional<smelt::ProfileInfo> profile;

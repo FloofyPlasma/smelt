@@ -31,4 +31,10 @@ expect_error missing_semicolon \
 expect_error unterminated_block \
     'project "p" { version = "0.1.0";' "expected '}'"
 
+expect_error call_unclosed \
+    'project "p" { version = f("a"; }' "expected ',' or ')' in call"
+
+expect_error call_nested_wrong_type \
+    'project "p" { version = f(g("a")); }' "'version' must be a quoted string"
+
 echo "ok"

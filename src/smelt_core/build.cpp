@@ -288,9 +288,16 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   for (const auto &d : t.publicIncludes)
     u.includes.push_back((p.root / d).lexically_normal().string());
 
+  for (const auto &d : t.systemIncludes)
+    u.systemIncludes.push_back(d);
+
   for (const auto &raw : t.defines) {
     BuildDefine def = parseDefine(raw, owner, 3);
     u.defines.push_back(std::move(def));
+  }
+
+  for (const auto &raw : t.publicDefines) {
+    u.defines.push_back(parseDefine(raw, owner, 3));
   }
 
   u.options.insert(u.options.end(), t.compileOptions.begin(),
@@ -326,11 +333,23 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   for (const auto &raw : t.defines)
     u.defines.push_back(parseDefine(raw, owner, 2));
 
+  switch (t.warnings) {
+  case WarningLevel::All:
+    u.warnings = {"-Wall", "-Wextra"};
+    break;
+  case WarningLevel::Default:
+    break;
+  case WarningLevel::None:
+    u.warnings = {"-w"};
+    break;
+  }
+
   addPublic(n, u);
   std::set<NodeKey> seen{n};
   walkDeps(n, seen, u);
 
   dedupe(u.includes);
+  dedupe(u.systemIncludes);
   dedupe(u.options);
   dedupe(u.link);
   return u;
@@ -361,9 +380,9 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
       "-MF",
       dep.string(),
       stdFlag(pkg.model.project, src.isCxx),
-      "-Wall",
-      "-Wextra",
   };
+
+  args.insert(args.end(), u.warnings.begin(), u.warnings.end());
 
   switch (profile_.optimization) {
   case Optimization::None:
@@ -383,6 +402,10 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
     args.push_back("-D" + d);
 
   args.insert(args.end(), u.options.begin(), u.options.end());
+  for (const auto &s : u.systemIncludes) {
+    args.push_back("-isystem");
+    args.push_back(s);
+  }
   for (const auto &i : u.includes)
     args.push_back("-I" + i);
 
@@ -452,6 +475,9 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
     if (!visited.insert(node).second)
       return true;
 
+    if (target(node).type == TargetType::System)
+      return true;
+
     for (const auto &dep : depsOf(node)) {
       if (target(dep).type == TargetType::Exe) {
         std::cerr << "smelt: target '" << target(node).name
@@ -501,6 +527,8 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       return;
 
     const TargetInfo &t = target(node);
+    if (t.type == TargetType::System)
+      return;
     for (const auto &dep : depsOf(node)) {
       if (target(dep).type == TargetType::Exe) {
         std::cerr << "smelt: target '" << t.name << "' depends on exe '"
