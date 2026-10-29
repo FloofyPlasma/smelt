@@ -296,6 +296,10 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
     u.defines.push_back(std::move(def));
   }
 
+  for (const auto &raw : t.publicDefines) {
+    u.defines.push_back(parseDefine(raw, owner, 3));
+  }
+
   u.options.insert(u.options.end(), t.compileOptions.begin(),
                    t.compileOptions.end());
   u.link.insert(u.link.end(), t.link.begin(), t.link.end());

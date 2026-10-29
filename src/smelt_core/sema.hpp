@@ -47,6 +47,7 @@ struct TargetInfo {
   std::vector<std::string> publicIncludes;
   std::vector<std::string> privateIncludes;
   std::vector<std::string> systemIncludes;
+  std::vector<std::string> publicDefines;
   std::vector<std::string> defines;
   std::vector<std::string> compileOptions;
   std::vector<std::string> link;
