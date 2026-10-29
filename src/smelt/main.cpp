@@ -49,6 +49,7 @@ void usage(bool toStdout = false) {
          "  smelt clean\n"
          "  smelt fetch\n"
          "  smelt tree\n"
+         "  smelt check\n"
          "  smelt compdb [--profile NAME]\n"
          "  smelt --version\n";
 }
@@ -58,10 +59,11 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
     return false;
   o.command = argv[1];
 
-  const bool known =
-      o.command == "build" || o.command == "run" || o.command == "clean" ||
-      o.command == "fetch" || o.command == "update" || o.command == "compdb" ||
-      o.command == "install" || o.command == "uninstall" || o.command == "tree";
+  const bool known = o.command == "build" || o.command == "run" ||
+                     o.command == "clean" || o.command == "fetch" ||
+                     o.command == "update" || o.command == "compdb" ||
+                     o.command == "install" || o.command == "uninstall" ||
+                     o.command == "tree" || o.command == "check";
 
   if (argc == 2 && std::string(argv[1]) == "--version") {
     o.command = "version";
@@ -75,6 +77,9 @@ auto parseOptions(int argc, char **argv, Options &o) -> bool {
   }
 
   if (!known)
+    return false;
+
+  if (o.command == "check" && argc != 2)
     return false;
 
   for (int i = 2; i < argc; ++i) {
@@ -196,6 +201,17 @@ int main(int argc, char **argv) {
 
   if (opts.command == "tree")
     return smelt::printTree(root);
+
+  if (opts.command == "check") {
+    smelt::Diagnostics diags("project.smelt");
+    const auto model = smelt::loadModel(root / projectFile, diags);
+    if (!model) {
+      printDiagnostics(diags);
+      return 1;
+    }
+    std::cout << "ok: project '" << model->project.name << "'\n";
+    return 0;
+  }
 
   if (opts.command == "fetch" || opts.command == "update") {
     if (!smelt::requireTools(toolsFor(opts, true, false)))
