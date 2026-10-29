@@ -333,6 +333,17 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   for (const auto &raw : t.defines)
     u.defines.push_back(parseDefine(raw, owner, 2));
 
+  switch (t.warnings) {
+  case WarningLevel::All:
+    u.warnings = {"-Wall", "-Wextra"};
+    break;
+  case WarningLevel::Default:
+    break;
+  case WarningLevel::None:
+    u.warnings = {"-w"};
+    break;
+  }
+
   addPublic(n, u);
   std::set<NodeKey> seen{n};
   walkDeps(n, seen, u);
@@ -369,9 +380,9 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
       "-MF",
       dep.string(),
       stdFlag(pkg.model.project, src.isCxx),
-      "-Wall",
-      "-Wextra",
   };
+
+  args.insert(args.end(), u.warnings.begin(), u.warnings.end());
 
   switch (profile_.optimization) {
   case Optimization::None:

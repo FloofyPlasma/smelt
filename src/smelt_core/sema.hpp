@@ -9,6 +9,7 @@
 namespace smelt {
 enum class Optimization : std::uint8_t { None, Speed, Size };
 enum class TargetType : std::uint8_t { Exe, StaticLib, System };
+enum class WarningLevel : std::uint8_t { All, Default, None };
 
 struct ProjectInfo {
   SourceLoc loc;
@@ -37,6 +38,7 @@ struct PlatformRules {
 };
 
 struct TargetInfo {
+  WarningLevel warnings = WarningLevel::Default;
   SourceLoc loc;
   std::string name;
   TargetType type = TargetType::Exe;

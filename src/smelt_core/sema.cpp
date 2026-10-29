@@ -319,6 +319,17 @@ private:
         exportLoc = a.loc;
         if (auto b = asBool(a))
           t.exported = *b;
+      } else if (a.key == "warnings") {
+        if (auto w = asWord(a)) {
+          if (*w == "all")
+            t.warnings = WarningLevel::All;
+          else if (*w == "default")
+            t.warnings = WarningLevel::Default;
+          else if (*w == "none")
+            t.warnings = WarningLevel::None;
+          else
+            error(a.value.loc, "warnings must be all, default, or none");
+        }
       } else if (a.key == "files") {
         assignList(a, t.files);
       } else if (a.key == "exclude") {
