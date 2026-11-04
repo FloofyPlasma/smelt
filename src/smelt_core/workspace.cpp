@@ -14,6 +14,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 

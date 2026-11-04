@@ -9,7 +9,7 @@ OUT="$ROOT/build/stage0"
 mkdir -p "$OUT"
 
 "$CXX" \
-  -std=c++20 \
+  -std=c++23 \
   -O2 \
   -Wall -Wextra \
   -ffile-prefix-map="$ROOT"=. \
