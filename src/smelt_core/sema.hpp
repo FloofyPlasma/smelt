@@ -17,6 +17,7 @@ struct ProjectInfo {
   std::optional<std::string> version;
   std::optional<int> cxxStd;
   std::optional<int> cStd;
+  bool stdModule = false;
 };
 
 struct ProfileInfo {

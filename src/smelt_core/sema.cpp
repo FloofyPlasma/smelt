@@ -207,10 +207,17 @@ private:
           else
             error(a.value.loc, "c_std must be 99, 11, 17, or 23");
         }
+      } else if (a.key == "std_module") {
+        if (auto b = asBool(a))
+          p.stdModule = *b;
       } else {
         unknownKey(a, "project");
       }
     }
+
+    if (p.stdModule && (!p.cxxStd || *p.cxxStd < 23))
+      error(decl.loc, "std_module needs cxx_std = 23 or newer");
+
     return p;
   }
 

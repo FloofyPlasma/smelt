@@ -1,8 +1,10 @@
 #include "build.hpp"
 #include "console.hpp"
 #include "discover.hpp"
+#include "hash.hpp"
 #include "process.hpp"
 #include "sema.hpp"
+#include "std_module.hpp"
 #include "workspace.hpp"
 #include <algorithm>
 #include <chrono>
@@ -34,27 +36,6 @@ auto readText(const fs::path &p) -> std::optional<std::string> {
   ss << in.rdbuf();
   return ss.str();
 }
-
-auto hashHex(const std::string &text) -> std::string {
-  std::uint64_t h = 0xCBF29CE484222325; // FNV-1a
-  for (const unsigned char c : text) {
-    h ^= c;
-    h *= 0x00000100000001B3;
-  }
-  std::ostringstream out;
-  out << std::hex << std::setw(16) << std::setfill('0') << h;
-  return out.str();
-}
-
-auto signatureOf(const std::vector<std::string> &args) -> std::string {
-  std::string joined;
-  for (const auto &a : args) {
-    joined += a;
-    joined += '\x1f';
-  }
-  return hashHex(joined);
-}
-
 auto readDepFile(const fs::path &depFile)
     -> std::optional<std::vector<std::string>> {
   const auto raw = readText(depFile);
@@ -212,6 +193,27 @@ Outcome runLink(const std::vector<std::string> &args, const fs::path &out,
   return Outcome::Built;
 }
 
+Outcome runStdModule(const std::vector<std::string> &args, const fs::path &pcm,
+                     const fs::path &log, const fs::path &sig,
+                     const std::string &sigText, const fs::path &source,
+                     Console &console) {
+  if (!isStale(pcm, sig, sigText, {source}))
+    return Outcome::Cached;
+
+  fs::create_directories(pcm.parent_path());
+  fs::remove(pcm);
+  fs::remove(sig);
+
+  const int rc = runProcessLogged(args, log.string());
+  printLog(log, console);
+  if (rc != 0) {
+    console.err("smelt: std module precompile failed: " + joinCommand(args));
+    return Outcome::Failed;
+  }
+  writeSignature(sig, sigText);
+  return Outcome::Built;
+}
+
 void dedupe(std::vector<std::string> &v) {
   std::set<std::string> seen;
   std::vector<std::string> out;
@@ -259,10 +261,41 @@ struct Job {
 
 Builder::Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
                  ProfileInfo profile)
-    : ws_(ws), sources_(sources), profile_(std::move(profile)) {}
+    : ws_(ws), sources_(sources), profile_(std::move(profile)) {
+  stdEnabled_ = ws_.packages[0].model.project.stdModule;
+}
 
 auto Builder::target(const NodeKey &n) const -> const TargetInfo & {
   return *findTarget(ws_.packages[n.first], n.second);
+}
+
+auto Builder::prepareStd() -> bool {
+  if (!stdEnabled_ || stdSource_)
+    return true;
+
+  const auto major = clangMajorVersion();
+  if (!major) {
+    std::cerr << "smelt: std_module needs clang++ on PATH\n";
+    return false;
+  }
+  if (*major < kMinClangForStdModule) {
+    std::cerr << "smelt: std_module needs clang " << kMinClangForStdModule
+              << " or newer; found clang " << *major << "\n";
+    return false;
+  }
+
+  std::string err;
+  const auto src = findStdModule(err);
+  if (!src) {
+    std::cerr << "smelt: " << err << "\n";
+    return false;
+  }
+  stdSource_ = *src;
+  return true;
+}
+
+auto Builder::stdPcm() const -> fs::path {
+  return ws_.packages[0].root / "build" / profile_.name / "std" / "std.pcm";
 }
 
 auto Builder::depsOf(const NodeKey &n) const -> std::vector<NodeKey> {
@@ -379,10 +412,17 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
       "-MMD",
       "-MF",
       dep.string(),
-      stdFlag(pkg.model.project, src.isCxx),
+      stdFlag(stdEnabled_ && src.isCxx ? ws_.packages[0].model.project
+                                       : pkg.model.project,
+              src.isCxx),
   };
 
   args.insert(args.end(), u.warnings.begin(), u.warnings.end());
+
+  if (stdEnabled_ && src.isCxx) {
+    args.push_back("-stdlib=libc++");
+    args.push_back("-fmodule-file=std=" + stdPcm().string());
+  }
 
   switch (profile_.optimization) {
   case Optimization::None:
@@ -471,6 +511,9 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
   std::vector<CompileUnit> out;
   std::set<NodeKey> visited;
 
+  if (!prepareStd())
+    return std::nullopt;
+
   std::function<bool(const NodeKey &)> visit = [&](const NodeKey &node) {
     if (!visited.insert(node).second)
       return true;
@@ -519,8 +562,41 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
   std::set<NodeKey> planned;
   bool planOk = true;
 
+  if (!prepareStd())
+    return std::nullopt;
+
   if (const auto it = outputs_.find(root); it != outputs_.end())
     return it->second;
+
+  std::size_t stdJob = 0;
+  if (stdEnabled_) {
+    const fs::path pcm = stdPcm();
+    const fs::path sig(pcm.string() + ".sig");
+    const fs::path log(pcm.string() + ".log");
+    const fs::path src = *stdSource_;
+    const std::vector<std::string> args{
+        "clang++",
+        stdFlag(ws_.packages[0].model.project, true),
+        "-stdlib=libc++",
+        "--precompile",
+        "-Wno-reserved-module-identifier",
+        "-o",
+        pcm.string(),
+        src.string(),
+    };
+    const std::string sigText = signatureOf(args) + ":" + fileHash(src) + ":" +
+                                signatureOf({clangVersionText().value_or("")});
+
+    Job j;
+    j.label = "std: precompile std.pcm";
+    j.target = "std";
+    j.endsTarget = true;
+    j.run = [=, &console = console_] {
+      return runStdModule(args, pcm, log, sig, sigText, src, console);
+    };
+    graph.push_back(std::move(j));
+    stdJob = graph.size() - 1;
+  }
 
   std::function<void(const NodeKey &)> plan = [&](const NodeKey &node) {
     if (outputs_.count(node) || !planned.insert(node).second)
@@ -578,6 +654,10 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       j.target = display;
       graph.push_back(std::move(j));
       compileJobs.push_back(graph.size() - 1);
+      if (stdEnabled_ && file.isCxx) {
+        graph[stdJob].next.push_back(graph.size() - 1);
+        graph.back().waiting++;
+      }
       objects.push_back(obj);
     }
 
@@ -620,6 +700,8 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
       std::vector<std::string> args{"clang++"};
       if (profile_.debugInfo)
         args.push_back("-g");
+      if (stdEnabled_)
+        args.push_back("-stdlib=libc++");
       args.push_back("-o");
       args.push_back(out.string());
       for (const auto &o : objects)
