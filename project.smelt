@@ -1,6 +1,6 @@
 project "smelt" {
     version = "2.1.0";
-    cxx_std = 20;
+    cxx_std = 23;
     c_std = 17;
 }
 
