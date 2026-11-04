@@ -1,6 +1,7 @@
 #include "build.hpp"
 #include "console.hpp"
 #include "discover.hpp"
+#include "hash.hpp"
 #include "process.hpp"
 #include "sema.hpp"
 #include "workspace.hpp"
@@ -34,27 +35,6 @@ auto readText(const fs::path &p) -> std::optional<std::string> {
   ss << in.rdbuf();
   return ss.str();
 }
-
-auto hashHex(const std::string &text) -> std::string {
-  std::uint64_t h = 0xCBF29CE484222325; // FNV-1a
-  for (const unsigned char c : text) {
-    h ^= c;
-    h *= 0x00000100000001B3;
-  }
-  std::ostringstream out;
-  out << std::hex << std::setw(16) << std::setfill('0') << h;
-  return out.str();
-}
-
-auto signatureOf(const std::vector<std::string> &args) -> std::string {
-  std::string joined;
-  for (const auto &a : args) {
-    joined += a;
-    joined += '\x1f';
-  }
-  return hashHex(joined);
-}
-
 auto readDepFile(const fs::path &depFile)
     -> std::optional<std::vector<std::string>> {
   const auto raw = readText(depFile);
