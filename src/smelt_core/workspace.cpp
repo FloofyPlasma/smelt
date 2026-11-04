@@ -112,6 +112,12 @@ private:
     if (!model)
       return std::nullopt;
 
+    if (!packages.empty() && model->project.stdModule) {
+      diags_.error(model->project.loc,
+                   "std_module may only be set in the root project");
+      return std::nullopt;
+    }
+
     for (const auto &p : packages) {
       if (p.model.project.name == model->project.name) {
         diags_.error(model->project.loc,

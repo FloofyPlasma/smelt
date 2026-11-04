@@ -60,7 +60,11 @@ private:
                                  const std::filesystem::path &obj,
                                  const std::filesystem::path &dep) const
       -> std::vector<std::string>;
+  [[nodiscard]] auto prepareStd() -> bool;
+  [[nodiscard]] auto stdPcm() const -> std::filesystem::path;
 
+  bool stdEnabled_ = false;
+  std::optional<std::filesystem::path> stdSource_;
   const Workspace &ws_;
   const std::vector<SourceMap> &sources_;
   ProfileInfo profile_;
