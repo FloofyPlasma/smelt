@@ -55,6 +55,15 @@ private:
   };
   auto scanNode(const NodeKey &node) const -> std::optional<ModuleInfo>;
 
+  struct Provider {
+    NodeKey owner;
+    std::filesystem::path interfacePath;
+  };
+  std::map<std::string, Provider> providers_;
+  bool scanned_ = false;
+
+  [[nodiscard]] auto scanWorkspace(const std::vector<NodeKey> &roots) -> bool;
+
   [[nodiscard]] auto target(const NodeKey &n) const -> const TargetInfo &;
   [[nodiscard]] auto depsOf(const NodeKey &n) const -> std::vector<NodeKey>;
   [[nodiscard]] auto outDir(const NodeKey &n) const -> std::filesystem::path;
@@ -63,6 +72,8 @@ private:
   [[nodiscard]] auto requirementsOf(const NodeKey &n) const -> Usage;
   void staticLibs(const NodeKey &n, std::set<NodeKey> &seen,
                   std::vector<NodeKey> &post) const;
+  [[nodiscard]] auto reachable(const std::vector<NodeKey> &roots) const
+      -> std::vector<NodeKey>;
   [[nodiscard]] auto resolveDefines(const Usage &u) const
       -> std::optional<std::vector<std::string>>;
   [[nodiscard]] auto

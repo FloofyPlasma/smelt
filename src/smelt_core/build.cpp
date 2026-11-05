@@ -413,6 +413,85 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   return u;
 }
 
+auto Builder::reachable(const std::vector<NodeKey> &roots) const
+    -> std::vector<NodeKey> {
+  std::vector<NodeKey> out;
+  std::set<NodeKey> seen;
+  std::function<void(const NodeKey &)> walk = [&](const NodeKey &n) {
+    if (!seen.insert(n).second)
+      return;
+    for (const auto &d : depsOf(n))
+      walk(d);
+    if (target(n).type != TargetType::System)
+      out.push_back(n);
+  };
+  for (const auto &r : roots)
+    walk(r);
+  return out;
+}
+
+auto Builder::scanWorkspace(const std::vector<NodeKey> &roots) -> bool {
+  if (scanned_)
+    return true;
+
+  std::vector<ScanUnit> units;
+  std::map<std::string, NodeKey> ownerOfUnit;
+
+  for (const auto &n : reachable(roots)) {
+    const Package &pkg = ws_.packages[n.first];
+    const TargetSources &src = sources_[n.first].at(n.second);
+    const Usage reqs = requirementsOf(n);
+    const fs::path objDir = outDir(n) / "obj";
+
+    for (const auto &file : src.files) {
+      if (!file.isCxx || !mayUseModules(file.path))
+        continue;
+      const fs::path obj = objDir / (file.relPath + ".o");
+      const fs::path depFile = fs::path(obj.string() + ".d");
+      units.push_back({pkg.root, file.path, obj,
+                       compileArgs(pkg, file, reqs, obj, depFile, {})});
+      ownerOfUnit[obj.string()] = n;
+    }
+  }
+
+  if (units.empty()) {
+    scanned_ = true;
+    return true;
+  }
+
+  const fs::path db = ws_.packages[0].root / "build" / profile_.name / "scan" /
+                      "compile_commands.json";
+  std::map<std::string, ScanRule> byOutput;
+  std::string err;
+  if (!scanModules(units, db, byOutput, err)) {
+    std::cerr << "smelt: " << err << "\n";
+    return false;
+  }
+
+  for (const auto &u : units) {
+    const auto rule = byOutput.find(u.output.string());
+    if (rule == byOutput.end())
+      continue;
+    const NodeKey owner = ownerOfUnit.at(u.output.string());
+    for (const auto &p : rule->second.provides) {
+      const auto existing = providers_.find(p.name);
+      if (existing != providers_.end()) {
+        std::cerr
+            << "smelt: module '" << p.name << "' is provided by both '"
+            << ws_.packages[existing->second.owner.first].model.project.name
+            << ":" << existing->second.owner.second << "' and '"
+            << ws_.packages[owner.first].model.project.name << ":"
+            << owner.second << "\n";
+        return false;
+      }
+      providers_[p.name] = Provider{owner, u.file};
+    }
+  }
+
+  scanned_ = true;
+  return true;
+}
+
 void Builder::staticLibs(const NodeKey &n, std::set<NodeKey> &seen,
                          std::vector<NodeKey> &post) const {
   for (const auto &d : depsOf(n)) {
@@ -660,6 +739,9 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
   bool planOk = true;
 
   if (!prepareStd())
+    return std::nullopt;
+
+  if (!scanWorkspace(roots))
     return std::nullopt;
 
   std::size_t stdJob = 0;
