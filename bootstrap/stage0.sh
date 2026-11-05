@@ -35,6 +35,7 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/init.cpp" \
   "$ROOT/src/smelt_core/hash.cpp" \
   "$ROOT/src/smelt_core/std_module.cpp" \
+  "$ROOT/src/smelt_core/module_scan.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -pthread -o "$OUT/smelt"
 
