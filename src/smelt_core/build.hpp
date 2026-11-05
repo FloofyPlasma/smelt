@@ -23,7 +23,10 @@ class Builder {
 public:
   Builder(const Workspace &ws, const std::vector<SourceMap> &sources,
           ProfileInfo profile);
-  [[nodiscard]] auto build(const NodeKey &node, std::size_t jobs)
+  [[nodiscard]] auto buildSet(const std::vector<NodeKey> &roots,
+                              std::size_t jobs)
+      -> std::optional<std::map<NodeKey, std::filesystem::path>>;
+  [[nodiscard]] auto build(const NodeKey &node, std::size_t jobs = 1)
       -> std::optional<std::filesystem::path>;
 
   struct CompileUnit {

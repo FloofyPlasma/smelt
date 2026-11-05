@@ -651,8 +651,8 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
   return out;
 }
 
-auto Builder::build(const NodeKey &root, const std::size_t jobs)
-    -> std::optional<fs::path> {
+auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
+    -> std::optional<std::map<NodeKey, fs::path>> {
   std::deque<Job> graph;
   std::map<NodeKey, std::size_t> producer;
   std::map<NodeKey, fs::path> outputPath;
@@ -661,9 +661,6 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
   if (!prepareStd())
     return std::nullopt;
-
-  if (const auto it = outputs_.find(root); it != outputs_.end())
-    return it->second;
 
   std::size_t stdJob = 0;
   if (stdEnabled_) {
@@ -1006,7 +1003,12 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
     producer[node] = outJob;
   };
 
-  plan(root);
+  for (const auto &r : roots) {
+    plan(r);
+    if (!planOk)
+      return std::nullopt;
+  }
+
   if (!planOk)
     return std::nullopt;
 
@@ -1087,6 +1089,18 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
   for (const auto &[node, path] : outputPath)
     outputs_[node] = path;
 
-  return outputPath.at(root);
+  std::map<NodeKey, fs::path> result;
+  for (const auto &r : roots)
+    result[r] = outputPath.count(r) ? outputPath.at(r) : outputs_.at(r);
+
+  return result;
+}
+
+auto Builder::build(const NodeKey &node, const std::size_t jobs)
+    -> std::optional<fs::path> {
+  const auto all = buildSet({node}, jobs);
+  if (!all)
+    return std::nullopt;
+  return all->at(node);
 }
 } // namespace smelt
