@@ -2,6 +2,7 @@
 
 #include "console.hpp"
 #include "discover.hpp"
+#include "module_scan.hpp"
 #include "sema.hpp"
 #include "workspace.hpp"
 #include <filesystem>
@@ -45,6 +46,12 @@ private:
     std::vector<std::string> link;
   };
 
+  struct ModuleInfo {
+    std::vector<ScanRule> scans;
+    std::map<std::string, std::size_t> providerOf;
+  };
+  auto scanNode(const NodeKey &node) const -> std::optional<ModuleInfo>;
+
   [[nodiscard]] auto target(const NodeKey &n) const -> const TargetInfo &;
   [[nodiscard]] auto depsOf(const NodeKey &n) const -> std::vector<NodeKey>;
   [[nodiscard]] auto outDir(const NodeKey &n) const -> std::filesystem::path;
@@ -55,11 +62,13 @@ private:
                   std::vector<NodeKey> &post) const;
   [[nodiscard]] auto resolveDefines(const Usage &u) const
       -> std::optional<std::vector<std::string>>;
-  [[nodiscard]] auto compileArgs(const Package &pkg, const SourceFile &src,
-                                 const Usage &u,
-                                 const std::filesystem::path &obj,
-                                 const std::filesystem::path &dep) const
+  [[nodiscard]] auto
+  compileArgs(const Package &pkg, const SourceFile &src, const Usage &u,
+              const std::filesystem::path &obj,
+              const std::filesystem::path &dep,
+              const std::vector<std::string> &moduleArgs) const
       -> std::vector<std::string>;
+
   [[nodiscard]] auto prepareStd() -> bool;
   [[nodiscard]] auto stdPcm() const -> std::filesystem::path;
 

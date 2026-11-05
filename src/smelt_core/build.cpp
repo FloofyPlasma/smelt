@@ -2,6 +2,7 @@
 #include "console.hpp"
 #include "discover.hpp"
 #include "hash.hpp"
+#include "module_scan.hpp"
 #include "process.hpp"
 #include "sema.hpp"
 #include "std_module.hpp"
@@ -129,11 +130,12 @@ enum class Outcome { Built, Cached, Failed };
 Outcome runCompile(const std::vector<std::string> &args, const fs::path &obj,
                    const fs::path &dep, const fs::path &sig,
                    const std::string &sigText, const fs::path &source,
-                   Console &console) {
+                   const std::vector<fs::path> &extra, Console &console) {
   const fs::path log = fs::path(obj.string() + ".log");
 
   const auto deps = readDepFile(dep);
   std::vector<fs::path> inputs{source};
+  inputs.insert(inputs.end(), extra.begin(), extra.end());
   if (deps) {
     for (const auto &d : *deps)
       inputs.emplace_back(d);
@@ -151,6 +153,29 @@ Outcome runCompile(const std::vector<std::string> &args, const fs::path &obj,
 
   if (rc != 0) {
     console.err("smelt: compile failed: " + joinCommand(args));
+    return Outcome::Failed;
+  }
+  writeSignature(sig, sigText);
+  return Outcome::Built;
+}
+
+Outcome runPrecompile(const std::vector<std::string> &args, const fs::path &pcm,
+                      const fs::path &sig, const std::string &sigText,
+                      const std::vector<fs::path> &inputs, Console &console) {
+  const fs::path log(pcm.string() + ".log");
+  if (!isStale(pcm, sig, sigText, inputs)) {
+    printLog(log, console);
+    return Outcome::Cached;
+  }
+
+  fs::create_directories(pcm.parent_path());
+  fs::remove(pcm);
+  fs::remove(sig);
+
+  const int rc = runProcessLogged(args, log.string());
+  printLog(log, console);
+  if (rc != 0) {
+    console.err("smelt: module precompile failed: " + joinCommand(args));
     return Outcome::Failed;
   }
   writeSignature(sig, sigText);
@@ -401,7 +426,8 @@ void Builder::staticLibs(const NodeKey &n, std::set<NodeKey> &seen,
 
 auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
                           const Usage &u, const std::filesystem::path &obj,
-                          const std::filesystem::path &dep) const
+                          const std::filesystem::path &dep,
+                          const std::vector<std::string> &moduleArgs) const
     -> std::vector<std::string> {
   std::vector<std::string> args{
       src.isCxx ? "clang++" : "clang",
@@ -423,6 +449,7 @@ auto Builder::compileArgs(const Package &pkg, const SourceFile &src,
     args.push_back("-stdlib=libc++");
     args.push_back("-fmodule-file=std=" + stdPcm().string());
   }
+  args.insert(args.end(), moduleArgs.begin(), moduleArgs.end());
 
   switch (profile_.optimization) {
   case Optimization::None:
@@ -505,6 +532,58 @@ auto Builder::resolveDefines(const Usage &u) const
   return out;
 }
 
+auto Builder::scanNode(const NodeKey &node) const -> std::optional<ModuleInfo> {
+  const Package &pkg = ws_.packages[node.first];
+  const TargetInfo &t = target(node);
+  const std::string display =
+      node.first == 0 ? t.name : pkg.model.project.name + "/" + t.name;
+  const TargetSources &src = sources_[node.first].at(node.second);
+  const Usage reqs = requirementsOf(node);
+  const fs::path dir = outDir(node);
+
+  ModuleInfo info;
+  info.scans.resize(src.files.size());
+
+  std::vector<ScanUnit> units;
+  std::vector<std::size_t> scanned;
+  for (std::size_t i = 0; i < src.files.size(); ++i) {
+    const auto &file = src.files[i];
+    if (!file.isCxx || !mayUseModules(file.path))
+      continue;
+    const fs::path obj = dir / "obj" / (file.relPath + ".o");
+    const fs::path depFile = fs::path(obj.string() + ".d");
+    units.push_back({pkg.root, file.path, obj,
+                     compileArgs(pkg, file, reqs, obj, depFile, {})});
+    scanned.push_back(i);
+  }
+
+  if (units.empty())
+    return info;
+
+  std::map<std::string, ScanRule> byOutput;
+  std::string err;
+  if (!scanModules(units, dir / "scan" / "compile_commands.json", byOutput,
+                   err)) {
+    std::cerr << "smelt: " << display << ": " << err << "\n";
+    return std::nullopt;
+  }
+
+  for (std::size_t k = 0; k < units.size(); ++k) {
+    const std::size_t i = scanned[k];
+    if (const auto it = byOutput.find(units[k].output.string());
+        it != byOutput.end())
+      info.scans[i] = it->second;
+    for (const auto &p : info.scans[i].provides) {
+      if (!info.providerOf.emplace(p.name, i).second) {
+        std::cerr << "smelt: module '" << p.name
+                  << "' is provided by two files in '" << t.name << "'\n";
+        return std::nullopt;
+      }
+    }
+  }
+  return info;
+}
+
 [[nodiscard]] auto
 Builder::compileUnits(const std::vector<std::string> &rootTargets)
     -> std::optional<std::vector<CompileUnit>> {
@@ -537,12 +616,30 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
     if (!resolveDefines(reqs))
       return false;
 
+    const fs::path modDir = outDir(node) / "modules";
     const fs::path objDir = outDir(node) / "obj";
-    for (const auto &file : src.files) {
+    const auto info = scanNode(node);
+    if (!info)
+      return false;
+
+    for (std::size_t i = 0; i < src.files.size(); ++i) {
+      const auto &file = src.files[i];
       const fs::path obj = objDir / (file.relPath + ".o");
       const fs::path dep = fs::path(obj.string() + ".d");
+
+      if (file.isCxx && !info->scans[i].provides.empty())
+        continue;
+
+      std::vector<std::string> flags;
+      for (const auto &n : info->scans[i].needs) {
+        if (n.sourcePath.empty())
+          continue;
+        flags.push_back("-fmodule-file=" + n.name + "=" +
+                        (modDir / (n.name + ".pcm")).string());
+      }
+
       out.push_back({ws_.packages[0].root, file.path, obj,
-                     compileArgs(pkg, file, reqs, obj, dep)});
+                     compileArgs(pkg, file, reqs, obj, dep, flags)});
     }
     return true;
   };
@@ -633,31 +730,203 @@ auto Builder::build(const NodeKey &root, const std::size_t jobs)
 
     const fs::path dir = outDir(node);
     const fs::path objDir = dir / "obj";
+    const fs::path modDir = dir / "modules";
+
+    const auto info = scanNode(node);
+    if (!info) {
+      planOk = false;
+      return;
+    }
+    const auto &scans = info->scans;
+    const auto &providerOf = info->providerOf;
+
+    auto importFlags = [&](const ScanRule &rule,
+                           std::vector<std::string> &flags,
+                           std::vector<fs::path> &inputs) -> bool {
+      for (const auto &n : rule.needs) {
+        if (n.sourcePath.empty()) {
+          if (n.name == "std" || n.name.rfind("std.", 0) == 0)
+            continue;
+          std::cerr << "smelt: '" << display << "' imports module '" << n.name
+                    << "', which no unit in '" << t.name << "' provides\n";
+          return false;
+        }
+        if (!providerOf.count(n.name)) {
+          std::cerr << "smelt: module '" << n.name << "' is imported by '"
+                    << display << "' but no unit in '" << t.name
+                    << "' provides it\n";
+          return false;
+        }
+        const fs::path pcm = modDir / (n.name + ".pcm");
+        flags.push_back("-fmodule-file=" + n.name + "=" + pcm.string());
+        inputs.push_back(pcm);
+      }
+      return true;
+    };
+
+    std::map<std::size_t, std::size_t> precompileJob;
+    std::set<std::size_t> inProgress;
+    std::function<bool(std::size_t)> planInterface =
+        [&](std::size_t i) -> bool {
+      if (precompileJob.count(i))
+        return true;
+      if (!inProgress.insert(i).second) {
+        std::cerr << "smelt: module import cycle in '" << t.name << "'\n";
+        return false;
+      }
+
+      const auto &file = src.files[i];
+      const std::string modName = scans[i].provides.front().name;
+
+      std::vector<std::string> flags;
+      std::vector<fs::path> inputs{file.path};
+      if (!importFlags(scans[i], flags, inputs))
+        return false;
+      for (const auto &n : scans[i].needs) {
+        if (!n.sourcePath.empty() && !planInterface(providerOf.at(n.name)))
+          return false;
+      }
+
+      const fs::path pcm = modDir / (modName + ".pcm");
+      const fs::path depFile = fs::path(pcm.string() + ".d");
+      const fs::path sig = fs::path(pcm.string() + ".sig");
+
+      std::vector<std::string> args{
+          "clang++", "--precompile", file.path.string(),
+          "-o",      pcm.string(),   stdFlag(pkg.model.project, true)};
+      if (stdEnabled_) {
+        args.push_back("-stdlib=libc++");
+        args.push_back("-fmodule-file=std=" + stdPcm().string());
+      }
+      args.insert(args.end(), reqs.warnings.begin(), reqs.warnings.end());
+      args.insert(args.end(), flags.begin(), flags.end());
+
+      switch (profile_.optimization) {
+      case Optimization::None:
+        args.push_back("-O0");
+        break;
+      case Optimization::Speed:
+        args.push_back("-O2");
+        break;
+      case Optimization::Size:
+        args.push_back("-Os");
+        break;
+      }
+      if (profile_.debugInfo)
+        args.push_back("-g");
+      for (const auto &d :
+           resolveDefines(reqs).value_or(std::vector<std::string>{}))
+        args.push_back("-D" + d);
+
+      const std::string sigText = signatureOf(args) + ":" + fileHash(file.path);
+
+      Job j;
+      j.label = display + ": PCM " + modName;
+      j.target = display;
+      j.run = [=, &console = console_] {
+        return runPrecompile(args, pcm, sig, sigText, inputs, console);
+      };
+      graph.push_back(std::move(j));
+      const std::size_t job = graph.size() - 1;
+      precompileJob[i] = job;
+
+      if (stdEnabled_) {
+        graph[stdJob].next.push_back(job);
+        graph[job].waiting++;
+      }
+      for (const auto &n : scans[i].needs) {
+        if (n.sourcePath.empty())
+          continue;
+        const std::size_t dep = precompileJob.at(providerOf.at(n.name));
+        graph[dep].next.push_back(job);
+        graph[job].waiting++;
+      }
+
+      inProgress.erase(i);
+      return true;
+    };
+
+    for (std::size_t i = 0; i < src.files.size(); ++i) {
+      if (!scans[i].provides.empty() && !planInterface(i)) {
+        planOk = false;
+        return;
+      }
+    }
 
     std::vector<std::size_t> compileJobs;
     std::vector<fs::path> objects;
-    for (const auto &file : src.files) {
+    for (std::size_t i = 0; i < src.files.size(); ++i) {
+      const auto &file = src.files[i];
       const fs::path obj = objDir / (file.relPath + ".o");
       const fs::path depFile = fs::path(obj.string() + ".d");
       const fs::path sig = fs::path(obj.string() + ".sig");
-      const auto args = compileArgs(pkg, file, reqs, obj, depFile);
+      const bool iface = file.isCxx && !scans[i].provides.empty();
+
+      std::vector<std::string> flags;
+      std::vector<fs::path> inputs;
+      if (file.isCxx && !importFlags(scans[i], flags, inputs)) {
+        planOk = false;
+        return;
+      }
+
+      SourceFile unit = file;
+      if (iface)
+        unit.path = modDir / (scans[i].provides.front().name + ".pcm");
+
+      std::vector<std::string> args;
+      if (iface) {
+        args = {"clang++", "-c",         unit.path.string(),
+                "-o",      obj.string(), stdFlag(pkg.model.project, true)};
+        switch (profile_.optimization) {
+        case Optimization::None:
+          args.push_back("-O0");
+          break;
+        case Optimization::Speed:
+          args.push_back("-O2");
+          break;
+        case Optimization::Size:
+          args.push_back("-Os");
+          break;
+        }
+        if (profile_.debugInfo)
+          args.push_back("-g");
+        for (const auto &d :
+             resolveDefines(reqs).value_or(std::vector<std::string>{}))
+          args.push_back("-D" + d);
+      } else
+        args = compileArgs(pkg, unit, reqs, obj, depFile, flags);
       const std::string sigText = signatureOf(args);
-      const std::string label = display + ": " +
-                                std::string(file.isCxx ? "CXX " : "CC  ") +
-                                file.relPath;
+      const std::string label =
+          display + ": " + (file.isCxx ? "CXX " : "CC  ") + file.relPath;
 
       Job j;
-      j.run = [=, &console = console_] {
-        return runCompile(args, obj, depFile, sig, sigText, file.path, console);
-      };
       j.label = label;
       j.target = display;
+      j.run = [=, &console = console_] {
+        return runCompile(args, obj, depFile, sig, sigText, unit.path, inputs,
+                          console);
+      };
       graph.push_back(std::move(j));
-      compileJobs.push_back(graph.size() - 1);
-      if (stdEnabled_ && file.isCxx) {
-        graph[stdJob].next.push_back(graph.size() - 1);
-        graph.back().waiting++;
+      const std::size_t job = graph.size() - 1;
+
+      if (file.isCxx && stdEnabled_) {
+        graph[stdJob].next.push_back(job);
+        graph[job].waiting++;
       }
+      if (iface) {
+        const std::size_t pre = precompileJob.at(i);
+        graph[pre].next.push_back(job);
+        graph[job].waiting++;
+      }
+      for (const auto &n : scans[i].needs) {
+        if (n.sourcePath.empty())
+          continue;
+        const std::size_t pre = precompileJob.at(providerOf.at(n.name));
+        graph[pre].next.push_back(job);
+        graph[job].waiting++;
+      }
+
+      compileJobs.push_back(job);
       objects.push_back(obj);
     }
 
