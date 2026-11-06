@@ -322,12 +322,15 @@ int main(int argc, char **argv) {
         names.push_back(t.name);
     }
 
-    for (const auto &name : names) {
-      const auto out = builder.build(smelt::NodeKey{0, name}, opts.jobs);
-      if (!out)
-        return 1;
-      printOutput(*smelt::findTarget(ws->packages[0], name), *out, root);
-    }
+    std::vector<smelt::NodeKey> keys;
+    for (const auto &name : names)
+      keys.push_back(smelt::NodeKey{0, name});
+    const auto outs = builder.buildSet(keys, opts.jobs);
+    if (!outs)
+      return 1;
+    for (const auto &name : names)
+      printOutput(*smelt::findTarget(ws->packages[0], name),
+                  outs->at(smelt::NodeKey{0, name}), root);
 
     const double secs = std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - started)

@@ -107,7 +107,7 @@ auto initProject(const fs::path &dir, const std::string &dirName,
                                   "use numbers separated by dots, like 0.1.0");
   const std::string kind = ask(in, out, "Kind (exe or static_lib)", "exe",
                                validKind, "answer exe or static_lib");
-  const std::string cxxStd = ask(in, out, "C++ standard", "20", validStd,
+  const std::string cxxStd = ask(in, out, "C++ standard", "23", validStd,
                                  "answer 11, 14, 17, 20, 23, or 26");
 
   const bool lib = kind == "static_lib";

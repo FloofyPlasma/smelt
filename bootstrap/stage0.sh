@@ -9,7 +9,7 @@ OUT="$ROOT/build/stage0"
 mkdir -p "$OUT"
 
 "$CXX" \
-  -std=c++20 \
+  -std=c++23 \
   -O2 \
   -Wall -Wextra \
   -ffile-prefix-map="$ROOT"=. \
@@ -33,6 +33,9 @@ mkdir -p "$OUT"
   "$ROOT/src/smelt_core/tools.cpp" \
   "$ROOT/src/smelt_core/tree.cpp" \
   "$ROOT/src/smelt_core/init.cpp" \
+  "$ROOT/src/smelt_core/hash.cpp" \
+  "$ROOT/src/smelt_core/std_module.cpp" \
+  "$ROOT/src/smelt_core/module_scan.cpp" \
   "$ROOT/src/smelt/main.cpp" \
   -pthread -o "$OUT/smelt"
 

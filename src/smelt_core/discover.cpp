@@ -16,7 +16,7 @@ constexpr std::string_view kPlatform = "linux";
 
 auto isSourceFile(const fs::path &p) -> bool {
   const fs::path ext = p.extension();
-  return ext == ".c" || ext == ".cpp";
+  return ext == ".c" || ext == ".cpp" || ext == ".cppm";
 }
 
 auto matchesAny(const std::vector<std::string> &patterns,
@@ -148,7 +148,9 @@ auto discoverSources(const Model &model,
       }
       owners[key] = t.name;
 
-      ts.files.push_back({relProject, canon, canon.extension() == ".cpp"});
+      ts.files.push_back(
+          {relProject, canon,
+           canon.extension() == ".cpp" || canon.extension() == ".cppm"});
     }
 
     out[t.name] = std::move(ts);
