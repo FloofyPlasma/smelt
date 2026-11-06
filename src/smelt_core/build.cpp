@@ -430,6 +430,86 @@ auto Builder::reachable(const std::vector<NodeKey> &roots) const
   return out;
 }
 
+auto Builder::displayName(const NodeKey &n) const -> std::string {
+  const Package &p = ws_.packages[n.first];
+  return n.first == 0 ? n.second : p.model.project.name + "/" + n.second;
+}
+
+auto Builder::closureOf(const NodeKey &node) const -> std::set<NodeKey> {
+  std::set<NodeKey> out;
+  std::function<void(const NodeKey &)> walk = [&](const NodeKey &n) {
+    for (const auto &d : depsOf(n)) {
+      if (out.insert(d).second)
+        walk(d);
+    }
+  };
+  walk(node);
+  return out;
+}
+
+auto Builder::resolveImports(const NodeKey &node, const ScanRule &rule,
+                             std::vector<std::string> &flags,
+                             std::vector<fs::path> &inputs,
+                             std::string &err) const -> bool {
+  const std::set<NodeKey> closure = closureOf(node);
+  bool crossTarget = false;
+
+  for (const auto &n : rule.needs) {
+    if (n.sourcePath.empty()) {
+      if (n.name == "std" || n.name.rfind("std.", 0) == 0)
+        continue;
+      err = "imports '" + n.name + "', which is not a known module";
+      return false;
+    }
+
+    const auto it = providers_.find(n.name);
+    if (it == providers_.end()) {
+      err = "imports module '" + n.name +
+            "', which no unit in the workspace provides";
+      return false;
+    }
+
+    const NodeKey owner = it->second.owner;
+    if (owner == node) {
+      const fs::path pcm = outDir(node) / "modules" / (n.name + ".pcm");
+      flags.push_back("-fmodule-file=" + n.name + "=" + pcm.string());
+      inputs.push_back(pcm);
+      continue;
+    }
+
+    crossTarget = true;
+    if (!closure.count(owner)) {
+      err = "imports module '" + n.name + "' from '" + displayName(owner) +
+            "', which this target does not depend on";
+      return false;
+    }
+    if (!target(owner).exported) {
+      err = "imports module '" + n.name + "' from '" + displayName(owner) +
+            "', which does not export it";
+      return false;
+    }
+    inputs.push_back(outDir(owner) / "modules" / (n.name + ".pcm"));
+  }
+
+  if (crossTarget || !rule.provides.empty() || !rule.needs.empty()) {
+    std::set<NodeKey> providing;
+    for (const auto &[name, p] : providers_)
+      providing.insert(p.owner);
+
+    std::set<NodeKey> scope = closure;
+    scope.insert(node);
+    std::set<fs::path> dirs;
+    for (const auto &t : scope) {
+      if (providing.count(t))
+        dirs.insert(outDir(t) / "modules");
+    }
+    for (const auto &d : dirs)
+      flags.push_back("-fprebuilt-module-path=" + d.string());
+  }
+
+  return true;
+}
+
 auto Builder::scanWorkspace(const std::vector<NodeKey> &roots) -> bool {
   if (scanned_)
     return true;
@@ -625,7 +705,6 @@ auto Builder::scanNode(const NodeKey &node) const -> std::optional<ModuleInfo> {
       continue;
     const fs::path obj = objDir / (file.relPath + ".o");
     if (const auto it = rules_.find(obj.string()); it != rules_.end())
-
       info.scans[i] = it->second;
   }
 
@@ -691,15 +770,13 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
       const fs::path obj = objDir / (file.relPath + ".o");
       const fs::path dep = fs::path(obj.string() + ".d");
 
-      if (file.isCxx && !info->scans[i].provides.empty())
-        continue;
-
       std::vector<std::string> flags;
-      for (const auto &n : info->scans[i].needs) {
-        if (n.sourcePath.empty())
-          continue;
-        flags.push_back("-fmodule-file=" + n.name + "=" +
-                        (modDir / (n.name + ".pcm")).string());
+      std::vector<fs::path> inputs;
+      std::string err;
+      if (file.isCxx &&
+          !resolveImports(node, info->scans[i], flags, inputs, err)) {
+        std::cerr << "smelt: " << displayName(node) << ": " << err << "\n";
+        return false;
       }
 
       out.push_back({ws_.packages[0].root, file.path, obj,
@@ -730,6 +807,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
     return std::nullopt;
 
   std::size_t stdJob = 0;
+  std::map<std::string, std::size_t> precompileOf;
   if (stdEnabled_) {
     const fs::path pcm = stdPcm();
     const fs::path sig(pcm.string() + ".sig");
@@ -807,29 +885,33 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
     auto importFlags = [&](const ScanRule &rule,
                            std::vector<std::string> &flags,
                            std::vector<fs::path> &inputs) -> bool {
-      for (const auto &n : rule.needs) {
-        if (n.sourcePath.empty()) {
-          if (n.name == "std" || n.name.rfind("std.", 0) == 0)
-            continue;
-          std::cerr << "smelt: '" << display << "' imports module '" << n.name
-                    << "', which no unit in '" << t.name << "' provides\n";
-          return false;
-        }
-        if (!providerOf.count(n.name)) {
-          std::cerr << "smelt: module '" << n.name << "' is imported by '"
-                    << display << "' but no unit in '" << t.name
-                    << "' provides it\n";
-          return false;
-        }
-        const fs::path pcm = modDir / (n.name + ".pcm");
-        flags.push_back("-fmodule-file=" + n.name + "=" + pcm.string());
-        inputs.push_back(pcm);
+      std::string err;
+      if (!resolveImports(node, rule, flags, inputs, err)) {
+        std::cerr << "smelt: " << display << ": " << err << "\n";
+        return false;
       }
       return true;
     };
 
     std::map<std::size_t, std::size_t> precompileJob;
     std::set<std::size_t> inProgress;
+
+    auto addImportEdges = [&](const ScanRule &rule, std::size_t job) {
+      for (const auto &n : rule.needs) {
+        if (n.sourcePath.empty())
+          continue;
+        if (providerOf.count(n.name)) {
+          const std::size_t pre = precompileJob.at(providerOf.at(n.name));
+          graph[pre].next.push_back(job);
+          graph[job].waiting++;
+        } else if (const auto it = precompileOf.find(n.name);
+                   it != precompileOf.end()) {
+          graph[it->second].next.push_back(job);
+          graph[job].waiting++;
+        }
+      }
+    };
+
     std::function<bool(std::size_t)> planInterface =
         [&](std::size_t i) -> bool {
       if (precompileJob.count(i))
@@ -847,7 +929,9 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       if (!importFlags(scans[i], flags, inputs))
         return false;
       for (const auto &n : scans[i].needs) {
-        if (!n.sourcePath.empty() && !planInterface(providerOf.at(n.name)))
+        if (n.sourcePath.empty() || !providerOf.count(n.name))
+          continue;
+        if (!planInterface(providerOf.at(n.name)))
           return false;
       }
 
@@ -855,9 +939,15 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       const fs::path depFile = fs::path(pcm.string() + ".d");
       const fs::path sig = fs::path(pcm.string() + ".sig");
 
-      std::vector<std::string> args{
-          "clang++", "--precompile", file.path.string(),
-          "-o",      pcm.string(),   stdFlag(pkg.model.project, true)};
+      std::vector<std::string> args{"clang++",
+                                    "--precompile",
+                                    file.path.string(),
+                                    "-o",
+                                    pcm.string(),
+                                    stdFlag(stdEnabled_
+                                                ? ws_.packages[0].model.project
+                                                : pkg.model.project,
+                                            true)};
       if (stdEnabled_) {
         args.push_back("-stdlib=libc++");
         args.push_back("-fmodule-file=std=" + stdPcm().string());
@@ -893,18 +983,13 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       graph.push_back(std::move(j));
       const std::size_t job = graph.size() - 1;
       precompileJob[i] = job;
+      precompileOf[modName] = job;
 
       if (stdEnabled_) {
         graph[stdJob].next.push_back(job);
         graph[job].waiting++;
       }
-      for (const auto &n : scans[i].needs) {
-        if (n.sourcePath.empty())
-          continue;
-        const std::size_t dep = precompileJob.at(providerOf.at(n.name));
-        graph[dep].next.push_back(job);
-        graph[job].waiting++;
-      }
+      addImportEdges(scans[i], job);
 
       inProgress.erase(i);
       return true;
@@ -933,7 +1018,45 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
         return;
       }
 
-      const auto args = compileArgs(pkg, file, reqs, obj, depFile, flags);
+      const fs::path modFile =
+          iface ? modDir / (scans[i].provides.front().name + ".pcm")
+                : file.path;
+
+      // TODO: Figure out a better way to get flags.
+      // I'm tired and I'm just making this little hack for now.
+      std::vector<std::string> args;
+      if (iface) {
+        args = {"clang++", "-c",         modFile.string(),
+                "-o",      obj.string(), stdFlag(pkg.model.project, true)};
+        if (stdEnabled_) {
+          args.push_back("-fmodule-file=std=" + stdPcm().string());
+        }
+        args.insert(args.end(), flags.begin(), flags.end());
+        switch (profile_.optimization) {
+        case Optimization::None:
+          args.push_back("-O0");
+          break;
+        case Optimization::Speed:
+          args.push_back("-O2");
+          break;
+        case Optimization::Size:
+          args.push_back("-Os");
+          break;
+        }
+        if (profile_.debugInfo)
+          args.push_back("-g");
+        for (const auto &d :
+             resolveDefines(reqs).value_or(std::vector<std::string>{}))
+          args.push_back("-D" + d);
+      } else {
+        args = compileArgs(pkg, file, reqs, obj, depFile, flags);
+      }
+      if (iface) {
+        for (auto &a : args) {
+          if (a == file.path.string())
+            a = modFile.string();
+        }
+      }
       const std::string sigText = signatureOf(args);
       const std::string label =
           display + ": " + (file.isCxx ? "CXX " : "CC  ") + file.relPath;
@@ -942,7 +1065,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       j.label = label;
       j.target = display;
       j.run = [=, &console = console_] {
-        return runCompile(args, obj, depFile, sig, sigText, file.path, inputs,
+        return runCompile(args, obj, depFile, sig, sigText, modFile, inputs,
                           console);
       };
       graph.push_back(std::move(j));
@@ -957,13 +1080,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
         graph[pre].next.push_back(job);
         graph[job].waiting++;
       }
-      for (const auto &n : scans[i].needs) {
-        if (n.sourcePath.empty())
-          continue;
-        const std::size_t pre = precompileJob.at(providerOf.at(n.name));
-        graph[pre].next.push_back(job);
-        graph[job].waiting++;
-      }
+      addImportEdges(scans[i], job);
 
       compileJobs.push_back(job);
       objects.push_back(obj);

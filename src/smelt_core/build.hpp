@@ -86,6 +86,12 @@ private:
 
   [[nodiscard]] auto prepareStd() -> bool;
   [[nodiscard]] auto stdPcm() const -> std::filesystem::path;
+  [[nodiscard]] auto closureOf(const NodeKey &node) const -> std::set<NodeKey>;
+  [[nodiscard]] auto displayName(const NodeKey &n) const -> std::string;
+  [[nodiscard]] auto resolveImports(const NodeKey &node, const ScanRule &rule,
+                                    std::vector<std::string> &flags,
+                                    std::vector<std::filesystem::path> &inputs,
+                                    std::string &err) const -> bool;
 
   bool stdEnabled_ = false;
   std::optional<std::filesystem::path> stdSource_;
