@@ -468,6 +468,8 @@ auto Builder::scanWorkspace(const std::vector<NodeKey> &roots) -> bool {
     return false;
   }
 
+  rules_ = byOutput;
+
   for (const auto &u : units) {
     const auto rule = byOutput.find(u.output.string());
     if (rule == byOutput.end())
@@ -612,50 +614,27 @@ auto Builder::resolveDefines(const Usage &u) const
 }
 
 auto Builder::scanNode(const NodeKey &node) const -> std::optional<ModuleInfo> {
-  const Package &pkg = ws_.packages[node.first];
-  const TargetInfo &t = target(node);
-  const std::string display =
-      node.first == 0 ? t.name : pkg.model.project.name + "/" + t.name;
   const TargetSources &src = sources_[node.first].at(node.second);
-  const Usage reqs = requirementsOf(node);
-  const fs::path dir = outDir(node);
+  const fs::path objDir = outDir(node) / "obj";
 
   ModuleInfo info;
   info.scans.resize(src.files.size());
-
-  std::vector<ScanUnit> units;
-  std::vector<std::size_t> scanned;
   for (std::size_t i = 0; i < src.files.size(); ++i) {
     const auto &file = src.files[i];
-    if (!file.isCxx || !mayUseModules(file.path))
+    if (!file.isCxx)
       continue;
-    const fs::path obj = dir / "obj" / (file.relPath + ".o");
-    const fs::path depFile = fs::path(obj.string() + ".d");
-    units.push_back({pkg.root, file.path, obj,
-                     compileArgs(pkg, file, reqs, obj, depFile, {})});
-    scanned.push_back(i);
-  }
+    const fs::path obj = objDir / (file.relPath + ".o");
+    if (const auto it = rules_.find(obj.string()); it != rules_.end())
 
-  if (units.empty())
-    return info;
-
-  std::map<std::string, ScanRule> byOutput;
-  std::string err;
-  if (!scanModules(units, dir / "scan" / "compile_commands.json", byOutput,
-                   err)) {
-    std::cerr << "smelt: " << display << ": " << err << "\n";
-    return std::nullopt;
-  }
-
-  for (std::size_t k = 0; k < units.size(); ++k) {
-    const std::size_t i = scanned[k];
-    if (const auto it = byOutput.find(units[k].output.string());
-        it != byOutput.end())
       info.scans[i] = it->second;
+  }
+
+  for (std::size_t i = 0; i < src.files.size(); ++i) {
     for (const auto &p : info.scans[i].provides) {
       if (!info.providerOf.emplace(p.name, i).second) {
         std::cerr << "smelt: module '" << p.name
-                  << "' is provided by two files in '" << t.name << "'\n";
+                  << "' is provided by two files in '" << target(node).name
+                  << "'\n";
         return std::nullopt;
       }
     }
@@ -670,6 +649,12 @@ Builder::compileUnits(const std::vector<std::string> &rootTargets)
   std::set<NodeKey> visited;
 
   if (!prepareStd())
+    return std::nullopt;
+
+  std::vector<NodeKey> roots;
+  for (const auto &name : rootTargets)
+    roots.push_back(NodeKey{0, name});
+  if (!scanWorkspace(roots))
     return std::nullopt;
 
   std::function<bool(const NodeKey &)> visit = [&](const NodeKey &node) {
@@ -948,32 +933,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
         return;
       }
 
-      SourceFile unit = file;
-      if (iface)
-        unit.path = modDir / (scans[i].provides.front().name + ".pcm");
-
-      std::vector<std::string> args;
-      if (iface) {
-        args = {"clang++", "-c",         unit.path.string(),
-                "-o",      obj.string(), stdFlag(pkg.model.project, true)};
-        switch (profile_.optimization) {
-        case Optimization::None:
-          args.push_back("-O0");
-          break;
-        case Optimization::Speed:
-          args.push_back("-O2");
-          break;
-        case Optimization::Size:
-          args.push_back("-Os");
-          break;
-        }
-        if (profile_.debugInfo)
-          args.push_back("-g");
-        for (const auto &d :
-             resolveDefines(reqs).value_or(std::vector<std::string>{}))
-          args.push_back("-D" + d);
-      } else
-        args = compileArgs(pkg, unit, reqs, obj, depFile, flags);
+      const auto args = compileArgs(pkg, file, reqs, obj, depFile, flags);
       const std::string sigText = signatureOf(args);
       const std::string label =
           display + ": " + (file.isCxx ? "CXX " : "CC  ") + file.relPath;
@@ -982,7 +942,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       j.label = label;
       j.target = display;
       j.run = [=, &console = console_] {
-        return runCompile(args, obj, depFile, sig, sigText, unit.path, inputs,
+        return runCompile(args, obj, depFile, sig, sigText, file.path, inputs,
                           console);
       };
       graph.push_back(std::move(j));

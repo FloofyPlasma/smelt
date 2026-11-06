@@ -60,6 +60,7 @@ private:
     std::filesystem::path interfacePath;
   };
   std::map<std::string, Provider> providers_;
+  std::map<std::string, ScanRule> rules_;
   bool scanned_ = false;
 
   [[nodiscard]] auto scanWorkspace(const std::vector<NodeKey> &roots) -> bool;
