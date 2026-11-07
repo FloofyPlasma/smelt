@@ -16,7 +16,9 @@
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <ostream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -39,85 +41,257 @@ struct Options {
       std::max<std::size_t>(1, std::thread::hardware_concurrency());
 };
 
-void usage(bool toStdout = false) {
-  std::ostream &out = toStdout ? std::cout : std::cerr;
-  out << "usage:\n"
-         "  smelt build [--profile NAME] [--target NAME] [--jobs N]\n"
-         "  smelt run   [--profile NAME] [--target NAME] [-- ARGS...]\n"
-         "  smelt update [NAME]\n"
-         "  smelt install   [--prefix DIR]\n"
-         "  smelt uninstall [--prefix DIR]\n"
-         "  smelt clean\n"
-         "  smelt fetch\n"
-         "  smelt tree\n"
-         "  smelt check\n"
-         "  smelt init\n"
-         "  smelt compdb [--profile NAME]\n"
-         "  smelt --version\n";
+struct CommandSpec {
+  std::string_view name;
+  std::string_view positional;
+  bool passthrough;
+  std::string_view summary;
+};
+
+struct OptionSpec {
+  std::string_view name;
+  std::string_view value;
+  std::string_view commands;
+  std::string_view help;
+};
+
+constexpr CommandSpec kCommands[] = {
+    {"build", "", false, "build the root project's targets"},
+    {"run", "", true, "build and run an executable target"},
+    {"clean", "", false, "remove build/"},
+    {"fetch", "", false, "resolve dependencies and write smelt.lock"},
+    {"update", "[NAME]", false, "move locked dependencies forward"},
+    {"tree", "", false, "show the dependency graph"},
+    {"check", "", false, "parse and check project.smelt"},
+    {"init", "", false, "create a project interactively"},
+    {"compdb", "", false, "write compile_commands.json"},
+    {"install", "", false, "build and install smelt into PREFIX/bin"},
+    {"uninstall", "", false, "remove the installed smelt"},
+};
+
+constexpr OptionSpec kOptions[] = {
+    {"--profile", "NAME", "build run compdb", "build profile"},
+    {"--target", "NAME", "build run", "build or run only this target"},
+    {"--jobs", "N", "build run", "parallel jobs, 1 to 4096 (default: cores)"},
+    {"--prefix", "DIR", "install uninstall",
+     "install prefix (default: ~/.local)"},
+};
+
+enum class Parse { Run, Help, Version, Error };
+
+auto findCommand(std::string_view name) -> const CommandSpec * {
+  for (const auto &c : kCommands) {
+    if (c.name == name)
+      return &c;
+  }
+  return nullptr;
 }
 
-auto parseOptions(int argc, char **argv, Options &o) -> bool {
-  if (argc < 2)
-    return false;
-  o.command = argv[1];
+auto findOption(std::string_view name) -> const OptionSpec * {
+  for (const auto &o : kOptions) {
+    if (o.name == name)
+      return &o;
+  }
+  return nullptr;
+}
 
-  const bool known =
-      o.command == "build" || o.command == "run" || o.command == "clean" ||
-      o.command == "fetch" || o.command == "update" || o.command == "compdb" ||
-      o.command == "install" || o.command == "uninstall" ||
-      o.command == "tree" || o.command == "check" || o.command == "init";
+auto appliesTo(const OptionSpec &opt, std::string_view cmd) -> bool {
+  std::size_t start = 0;
+  while (start <= opt.commands.size()) {
+    const std::size_t end = opt.commands.find(' ', start);
+    const std::string_view word = opt.commands.substr(
+        start,
+        end == std::string_view::npos ? std::string_view::npos : end - start);
 
-  if (argc == 2 && std::string(argv[1]) == "--version") {
-    o.command = "version";
-    return true;
+    if (word == cmd)
+      return true;
+    if (end == std::string_view::npos)
+      break;
+    start = end + 1;
+  }
+  return false;
+}
+
+auto parseJobs(std::string_view value, std::string &err)
+    -> std::optional<std::size_t> {
+  if (value.empty() || value.size() > 5 ||
+      value.find_first_not_of("0123456789") != std::string_view::npos) {
+    err = "'--jobs' needs a whole number, found '" + std::string(value) + "'";
+    return std::nullopt;
+  }
+  const std::size_t n = std::stoul(std::string(value));
+  if (n == 0) {
+    err = "'--jobs' must be at least 1, found '0'";
+    return std::nullopt;
+  }
+  if (n > 4096) {
+    err = "'--jobs' must be at most 4096, found '" + std::string(value) + "'";
+    return std::nullopt;
+  }
+  return n;
+}
+
+auto applyValue(Options &o, const OptionSpec &opt, std::string_view value,
+                std::string &err) -> bool {
+  if (opt.name == "--profile") {
+    o.profile = std::string(value);
+  } else if (opt.name == "--target") {
+    o.target = std::string(value);
+  } else if (opt.name == "--prefix") {
+    o.prefix = std::string(value);
+  } else if (opt.name == "--jobs") {
+    const auto n = parseJobs(value, err);
+    if (!n)
+      return false;
+    o.jobs = *n;
+  }
+  return true;
+}
+
+auto parseArgs(int argc, char **argv, Options &o, std::string &err) -> Parse {
+  std::vector<std::string_view> args;
+  for (int i = 1; i < argc; ++i)
+    args.emplace_back(argv[i]);
+
+  if (!args.empty() && !args[0].starts_with('-'))
+    o.command = std::string(args[0]);
+
+  for (const auto a : args) {
+    if (a == "--")
+      break;
+    if (a == "-h" || a == "--help")
+      return Parse::Help;
+    if (a == "--version")
+      return Parse::Version;
   }
 
-  if (argc == 2 &&
-      (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
-    usage(true);
-    std::exit(0);
+  if (args.empty()) {
+    err = "missing command";
+    return Parse::Error;
   }
+  if (args[0].starts_with('-')) {
+    err = "expected a command before '" + std::string(args[0]) + "'";
+    return Parse::Error;
+  }
+  const CommandSpec *cmd = findCommand(args[0]);
+  if (cmd == nullptr) {
+    err = "unknown command '" + std::string(args[0]) + "'";
+    return Parse::Error;
+  }
+  o.command = std::string(cmd->name);
 
-  if (!known)
-    return false;
+  std::vector<std::string_view> seen;
+  std::size_t positionals = 0;
 
-  if (o.command == "check" && argc != 2)
-    return false;
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string_view a = args[i];
 
-  for (int i = 2; i < argc; ++i) {
-    const std::string arg = argv[i];
-    if (arg == "--") {
-      for (int j = i + 1; j < argc; ++j)
-        o.runArgs.emplace_back(argv[j]);
+    if (a == "--") {
+      if (!cmd->passthrough) {
+        err = "'--' is only valid with run";
+        return Parse::Error;
+      }
+      for (++i; i < args.size(); ++i)
+        o.runArgs.emplace_back(args[i]);
       break;
     }
-    if (arg == "--profile" && i + 1 < argc) {
-      o.profile = argv[++i];
-    } else if (arg == "--prefix" && i + 1 < argc &&
-               (o.command == "install" || o.command == "uninstall")) {
-      o.prefix = argv[++i];
-    } else if ((arg == "--jobs" && i + 1 < argc) &&
-               (o.command == "build" || o.command == "run")) {
-      const std::string value = argv[++i];
-      try {
-        o.jobs = std::stoul(value);
-      } catch (const std::exception &) {
-        return false;
+
+    if (a.starts_with('-')) {
+      const OptionSpec *opt = findOption(a);
+      if (opt == nullptr) {
+        err = "unknown option '" + std::string(a) + "'";
+        return Parse::Error;
       }
-      if (o.jobs == 0)
-        return false;
-    } else if (arg == "--target" && i + 1 < argc) {
-      o.target = argv[++i];
-    } else if (o.command == "update" && !arg.empty() && arg[0] != '-' &&
-               o.updateName.empty()) {
-      o.updateName = arg;
-    } else {
-      return false;
+      if (!appliesTo(*opt, cmd->name)) {
+        err = "'" + std::string(a) + "' is not valid for '" +
+              std::string(cmd->name) + "'";
+        return Parse::Error;
+      }
+      if (std::find(seen.begin(), seen.end(), a) != seen.end()) {
+        err = "'" + std::string(a) + "' is given more than once";
+        return Parse::Error;
+      }
+      seen.push_back(a);
+
+      if (opt->value.empty())
+        continue;
+      if (i + 1 >= args.size() || args[i + 1].starts_with("--")) {
+        err = "'" + std::string(a) + "' needs a value";
+        return Parse::Error;
+      }
+      ++i;
+      if (!applyValue(o, *opt, args[i], err))
+        return Parse::Error;
+      continue;
     }
+
+    if (cmd->positional.empty()) {
+      err = "'" + std::string(a) + "' is not an argument for '" +
+            std::string(cmd->name) + "'";
+      return Parse::Error;
+    }
+    if (positionals == 1) {
+      err = "too many arguments for '" + std::string(cmd->name) +
+            "'; expected " + std::string(cmd->positional);
+      return Parse::Error;
+    }
+    o.updateName = std::string(a);
+    ++positionals;
   }
-  if (o.command != "run" && !o.runArgs.empty())
-    return false;
-  return true;
+
+  return Parse::Run;
+}
+
+void row(std::ostream &out, std::string left, std::string_view right) {
+  if (left.size() < 26)
+    left.append(26 - left.size(), ' ');
+  else
+    left += ' ';
+  out << "  " << left << right << "\n";
+}
+
+void printUsage(std::ostream &out, const CommandSpec *only) {
+  if (only == nullptr) {
+    out << "usage: smelt <command> [options]\n"
+           "       smelt --version | --help\n\n"
+           "commands:\n";
+    for (const auto &c : kCommands) {
+      std::string left(c.name);
+      if (!c.positional.empty())
+        left += " " + std::string(c.positional);
+      row(out, left, c.summary);
+    }
+    out << "\noptions (the commands each applies to are in brackets):\n";
+    for (const auto &o : kOptions) {
+      std::string left(o.name);
+      if (!o.value.empty())
+        left += " " + std::string(o.value);
+      row(out, left,
+          std::string(o.help) + " [" + std::string(o.commands) + "]");
+    }
+    return;
+  }
+
+  out << "usage: smelt " << only->name;
+  if (!only->positional.empty())
+    out << " " << only->positional;
+  out << " [options]";
+  if (only->passthrough)
+    out << " [-- ARGS...]";
+  out << "\n\n" << only->summary << "\n\noptions:\n";
+
+  bool any = false;
+  for (const auto &o : kOptions) {
+    if (!appliesTo(o, only->name))
+      continue;
+    any = true;
+    std::string left(o.name);
+    if (!o.value.empty())
+      left += " " + std::string(o.value);
+    row(out, left, o.help);
+  }
+  if (!any)
+    out << "  (none)\n";
 }
 
 void printDiagnostics(const smelt::Diagnostics &diags) {
@@ -159,14 +333,19 @@ int main(int argc, char **argv) {
   ::setenv("GIT_TERMINAL_PROMPT", "0", 1);
 
   Options opts;
-  if (!parseOptions(argc, argv, opts)) {
-    usage();
-    return 2;
-  }
-
-  if (opts.command == "version") {
+  std::string err;
+  switch (parseArgs(argc, argv, opts, err)) {
+  case Parse::Help:
+    printUsage(std::cout, findCommand(opts.command));
+    return 0;
+  case Parse::Version:
     std::cout << "smelt " << SMELT_VERSION << "\n";
     return 0;
+  case Parse::Error:
+    std::cerr << "smelt: " << err << "\nrun 'smelt --help' for usage\n";
+    return 2;
+  case Parse::Run:
+    break;
   }
 
   const auto started = std::chrono::steady_clock::now();
