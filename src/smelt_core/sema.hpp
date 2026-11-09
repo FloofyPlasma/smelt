@@ -36,6 +36,7 @@ struct PlatformRules {
   std::vector<std::string> files;
   std::vector<std::string> exclude;
   std::vector<std::string> link;
+  std::vector<std::string> defines;
 };
 
 struct TargetInfo {

@@ -354,6 +354,13 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
     u.defines.push_back(std::move(def));
   }
 
+  if (const PlatformRules *plat = platformRules(t)) {
+    const std::string source =
+        owner + " on " + std::string(currentPlatform());
+    for (const auto &raw : plat->defines)
+      u.defines.push_back(parseDefine(raw, source, 3));
+  }
+
   for (const auto &raw : t.publicDefines) {
     u.defines.push_back(parseDefine(raw, owner, 3));
   }
@@ -361,6 +368,8 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   u.options.insert(u.options.end(), t.compileOptions.begin(),
                    t.compileOptions.end());
   u.link.insert(u.link.end(), t.link.begin(), t.link.end());
+  if (const PlatformRules *plat = platformRules(t))
+    u.link.insert(u.link.end(), plat->link.begin(), plat->link.end());
 }
 
 void Builder::walkDeps(const NodeKey &n, std::set<NodeKey> &seen,
@@ -390,6 +399,13 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   const std::string owner = p.model.project.name + ":" + t.name;
   for (const auto &raw : t.defines)
     u.defines.push_back(parseDefine(raw, owner, 2));
+
+  if (const PlatformRules *plat = platformRules(t)) {
+    const std::string source =
+        owner + " on " + std::string(currentPlatform());
+    for (const auto &raw : plat->defines)
+      u.defines.push_back(parseDefine(raw, source, 2));
+  }
 
   switch (t.warnings) {
   case WarningLevel::All:

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 namespace smelt {
 struct SourceFile {
@@ -20,6 +21,11 @@ struct TargetSources {
 };
 
 using SourceMap = std::map<std::string, TargetSources>;
+
+[[nodiscard]] auto currentPlatform() -> std::string_view;
+
+[[nodiscard]] auto platformRules(const TargetInfo &t)
+    -> const PlatformRules *;
 
 [[nodiscard]] auto discoverSources(const Model &model,
                                    const std::filesystem::path &projectRoot,

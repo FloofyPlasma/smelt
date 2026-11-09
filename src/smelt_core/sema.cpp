@@ -517,6 +517,8 @@ private:
         assignList(a, rules.exclude);
       else if (a.key == "link")
         assignList(a, rules.link);
+      else if (a.key == "defines")
+        assignList(a, rules.defines);
       else
         error(a.loc, "setting '" + a.key + "' is not allowed in an 'on' block");
     }

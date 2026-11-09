@@ -16,7 +16,7 @@ constexpr std::string_view kPlatform = "linux";
 
 auto isSourceFile(const fs::path &p) -> bool {
   const fs::path ext = p.extension();
-  return ext == ".c" || ext == ".cpp" || ext == ".cppm";
+  return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cppm";
 }
 
 auto matchesAny(const std::vector<std::string> &patterns,
@@ -25,11 +25,14 @@ auto matchesAny(const std::vector<std::string> &patterns,
                      [&](const std::string &p) { return globMatch(p, path); });
 }
 
+} // namespace
+
+auto currentPlatform() -> std::string_view { return kPlatform; }
+
 auto platformRules(const TargetInfo &t) -> const PlatformRules * {
   const auto it = t.platforms.find(std::string(kPlatform));
   return it == t.platforms.end() ? nullptr : &it->second;
 }
-} // namespace
 
 auto discoverSources(const Model &model,
                      const std::filesystem::path &projectRoot,
@@ -148,9 +151,10 @@ auto discoverSources(const Model &model,
       }
       owners[key] = t.name;
 
-      ts.files.push_back(
-          {relProject, canon,
-           canon.extension() == ".cpp" || canon.extension() == ".cppm"});
+      ts.files.push_back({relProject, canon,
+                          canon.extension() == ".cc" ||
+                              canon.extension() == ".cpp" ||
+                              canon.extension() == ".cppm"});
     }
 
     out[t.name] = std::move(ts);
