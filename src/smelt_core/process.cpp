@@ -1,5 +1,4 @@
 #include "process.hpp"
-#include <bits/types/locale_t.h>
 #include <fcntl.h>
 #include <iostream>
 #include <string>

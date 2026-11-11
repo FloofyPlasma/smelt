@@ -8,6 +8,10 @@
 #include <system_error>
 #include <vector>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace smelt {
@@ -47,6 +51,29 @@ auto onPath(const fs::path &dir) -> bool {
   }
   return false;
 }
+
+auto getExecutablePath() -> fs::path {
+#ifdef __linux__
+  std::error_code ec;
+  auto path = fs::read_symlink("/proc/self/exe", ec);
+  if (ec)
+    return {};
+  return path;
+
+#elif defined(__APPLE__)
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+
+  std::string buffer(size, '\0');
+  if (_NSGetExecutablePath(buffer.data(), &size) != 0)
+    return {};
+
+  return fs::canonical(buffer);
+
+#else
+#error "Unsupported platform"
+#endif
+}
 } // namespace
 
 auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
@@ -65,8 +92,8 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
   }
 
   std::error_code ec;
-  const fs::path self = fs::read_symlink("/proc/self/exe", ec);
-  if (ec) {
+  const fs::path self = getExecutablePath();
+  if (self.empty()) {
     std::cerr << "smelt: cannot find the running binary\n";
     return 1;
   }

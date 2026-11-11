@@ -12,7 +12,13 @@ namespace fs = std::filesystem;
 
 namespace smelt {
 namespace {
+#if defined(__linux__)
 constexpr std::string_view kPlatform = "linux";
+#elif defined(__APPLE__)
+constexpr std::string_view kPlatform = "macos";
+#else
+#error "Unsupported platform."
+#endif
 
 auto isSourceFile(const fs::path &p) -> bool {
   const fs::path ext = p.extension();
