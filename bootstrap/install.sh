@@ -22,11 +22,11 @@ cd "$ROOT"
 "$ROOT/bootstrap/stage0.sh"
 
 rm -rf build/debug
-build/stage0/smelt build >/dev/null
+build/stage0/smelt build
 cp build/debug/smelt/smelt build/stage1
 
 rm -rf build/debug
-build/stage1 build >/dev/null
+build/stage1 build
 cp build/debug/smelt/smelt build/stage2
 if ! cmp -s build/stage1 build/stage2; then
   echo "stage1 and stage2 differ; not installing" >&2
