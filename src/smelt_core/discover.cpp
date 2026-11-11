@@ -25,6 +25,11 @@ auto isSourceFile(const fs::path &p) -> bool {
   return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cppm";
 }
 
+auto isHeaderFile(const fs::path &p) -> bool {
+  const fs::path ext = p.extension();
+  return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".inl";
+}
+
 auto matchesAny(const std::vector<std::string> &patterns,
                 const std::string &path) -> bool {
   return std::any_of(patterns.begin(), patterns.end(),
@@ -50,6 +55,29 @@ auto discoverSources(const Model &model,
   for (const auto &t : model.targets) {
     if (t.type == TargetType::System)
       continue;
+
+    if (t.type == TargetType::HeaderOnly) {
+      TargetSources ts;
+      ts.root = fs::canonical(projectRoot);
+      for (const auto &dir : t.publicIncludes) {
+        const fs::path base = projectRoot / dir;
+        if (!fs::is_directory(base)) {
+          diags.error(t.loc, "include directory '" + dir + "' does not exist");
+          ok = false;
+          continue;
+        }
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(base, ec), end;
+             !ec && it != end; it.increment(ec)) {
+          if (it->is_regular_file() && isHeaderFile(it->path()))
+            ts.headers.push_back(fs::canonical(it->path()));
+        }
+      }
+      std::sort(ts.headers.begin(), ts.headers.end());
+      out[t.name] = std::move(ts);
+      continue;
+    }
+
     const std::string rootRel = t.sourceDir.value_or("src/" + t.name);
     const fs::path root = projectRoot / rootRel;
 
@@ -124,7 +152,7 @@ auto discoverSources(const Model &model,
       candidates.emplace_back(canon.string(), canon);
     }
 
-    if (candidates.empty()) {
+    if (candidates.empty() && t.type != TargetType::HeaderOnly) {
       diags.error(t.loc,
                   "target '" + t.name + "' has no sources after filtering");
       ok = false;

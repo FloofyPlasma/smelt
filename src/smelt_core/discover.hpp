@@ -18,14 +18,14 @@ struct SourceFile {
 struct TargetSources {
   std::filesystem::path root;
   std::vector<SourceFile> files;
+  std::vector<std::filesystem::path> headers;
 };
 
 using SourceMap = std::map<std::string, TargetSources>;
 
 [[nodiscard]] auto currentPlatform() -> std::string_view;
 
-[[nodiscard]] auto platformRules(const TargetInfo &t)
-    -> const PlatformRules *;
+[[nodiscard]] auto platformRules(const TargetInfo &t) -> const PlatformRules *;
 
 [[nodiscard]] auto discoverSources(const Model &model,
                                    const std::filesystem::path &projectRoot,

@@ -309,7 +309,9 @@ std::vector<std::string> rootTargetNames(const smelt::Workspace &ws) {
 
 void printOutput(const smelt::TargetInfo &t, const fs::path &out,
                  const fs::path &root) {
-  const std::string kind = t.type == smelt::TargetType::Exe ? "exe" : "lib";
+  const std::string kind = t.type == smelt::TargetType::Exe          ? "exe"
+                           : t.type == smelt::TargetType::HeaderOnly ? "hdr"
+                                                                     : "lib";
   std::cout << "  " << kind << "  " << fs::relative(out, root).string() << "\n";
 }
 
