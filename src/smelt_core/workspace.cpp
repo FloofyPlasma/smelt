@@ -304,7 +304,12 @@ private:
 
     const fs::path reg = registryDir(rootDir_);
     std::error_code ec;
-    if (!fs::exists(reg, ec) || headCommit(reg) != lock_.registryCommit) {
+    if (!fs::exists(reg, ec)) {
+      diags_.error(dep.loc, "registry for '" + dep.name +
+                                "' is missing; run 'smelt fetch'");
+      return false;
+    }
+    if (headCommit(reg) != lock_.registryCommit) {
       diags_.error(dep.loc,
                    "registry entry for '" + dep.name +
                        "' differs from smelt.lock; run 'smelt update " +
