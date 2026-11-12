@@ -8,7 +8,7 @@
 #include <string>
 namespace smelt {
 enum class Optimization : std::uint8_t { None, Speed, Size };
-enum class TargetType : std::uint8_t { Exe, StaticLib, System };
+enum class TargetType : std::uint8_t { Exe, StaticLib, System, HeaderOnly };
 enum class WarningLevel : std::uint8_t { All, Default, None };
 
 struct ProjectInfo {

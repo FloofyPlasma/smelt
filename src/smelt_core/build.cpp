@@ -200,6 +200,25 @@ Outcome runArchive(const std::vector<std::string> &args, const fs::path &out,
   return Outcome::Built;
 }
 
+Outcome runStamp(const fs::path &stamp, const std::vector<fs::path> &headers,
+                 Console &console) {
+  std::string text;
+  for (const auto &h : headers)
+    text += h.string() + " " + fileHash(h) + "\n";
+
+  if (readText(stamp) == text)
+    return Outcome::Cached;
+
+  fs::create_directories(stamp.parent_path());
+  std::ofstream out(stamp, std::ios::binary);
+  out << text;
+  if (!out) {
+    console.err("smelt: cannot write " + stamp.string());
+    return Outcome::Failed;
+  }
+  return Outcome::Built;
+}
+
 Outcome runLink(const std::vector<std::string> &args, const fs::path &out,
                 const fs::path &sig, const std::string &sigText,
                 const std::vector<fs::path> &inputs, Console &console) {
@@ -355,8 +374,7 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   }
 
   if (const PlatformRules *plat = platformRules(t)) {
-    const std::string source =
-        owner + " on " + std::string(currentPlatform());
+    const std::string source = owner + " on " + std::string(currentPlatform());
     for (const auto &raw : plat->defines)
       u.defines.push_back(parseDefine(raw, source, 3));
   }
@@ -401,8 +419,7 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
     u.defines.push_back(parseDefine(raw, owner, 2));
 
   if (const PlatformRules *plat = platformRules(t)) {
-    const std::string source =
-        owner + " on " + std::string(currentPlatform());
+    const std::string source = owner + " on " + std::string(currentPlatform());
     for (const auto &raw : plat->defines)
       u.defines.push_back(parseDefine(raw, source, 2));
   }
@@ -887,6 +904,24 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
     (void)defs;
 
     const fs::path dir = outDir(node);
+
+    if (t.type == TargetType::HeaderOnly) {
+      const fs::path stamp = dir / "stamp";
+      const auto headers = src.headers;
+
+      Job j;
+      j.label = display + ": stamp";
+      j.target = display;
+      j.endsTarget = true;
+      j.run = [=, &console = console_] {
+        return runStamp(stamp, headers, console);
+      };
+      graph.push_back(std::move(j));
+      producer[node] = graph.size() - 1;
+      outputPath[node] = stamp;
+      return;
+    }
+
     const fs::path objDir = dir / "obj";
     const fs::path modDir = dir / "modules";
 
@@ -1169,6 +1204,13 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
         graph[jobIndex].next.push_back(outJob);
       }
       outputPath[node] = out;
+    }
+
+    for (const auto &dep : depsOf(node)) {
+      if (target(dep).type == TargetType::HeaderOnly && producer.count(dep)) {
+        graph[producer.at(dep)].next.push_back(outJob);
+        graph[outJob].waiting++;
+      }
     }
 
     for (const auto c : compileJobs) {

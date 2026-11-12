@@ -202,10 +202,10 @@ private:
         }
       } else if (a.key == "c_std") {
         if (auto v = asInt(a)) {
-          if (oneOfInt(*v, {99, 11, 17, 23}))
+          if (oneOfInt(*v, {89, 99, 11, 17, 23}))
             p.cStd = static_cast<int>(*v);
           else
-            error(a.value.loc, "c_std must be 99, 11, 17, or 23");
+            error(a.value.loc, "c_std must be 89, 99, 11, 17, or 23");
         }
       } else if (a.key == "std_module") {
         if (auto b = asBool(a))
@@ -311,8 +311,10 @@ private:
             t.type = TargetType::Exe;
           else if (*w == "static_lib")
             t.type = TargetType::StaticLib;
+          else if (*w == "header_only")
+            t.type = TargetType::HeaderOnly;
           else
-            error(a.value.loc, "type must be exe or static_lib");
+            error(a.value.loc, "type must be exe static_lib, or header_only");
         }
       } else if (a.key == "source_dir") {
         if (auto s = asString(a)) {
