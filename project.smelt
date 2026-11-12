@@ -24,6 +24,13 @@ target "smelt" {
     type = exe;
     warnings = all;
     depends = ["smelt_core"];
-    link = ["-pthread"];
     defines = ["SMELT_VERSION=\"2.3.0-dev\""];
+
+    on linux {
+        link = ["-pthread"];
+    }
+
+    on macos {
+        link = ["-pthread"];
+    }
 }

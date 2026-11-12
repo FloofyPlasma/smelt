@@ -2,13 +2,21 @@
 #include "diagnostics.hpp"
 #include "process.hpp"
 #include "workspace.hpp"
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
 
-#ifdef __APPLE__
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#elif defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
 
@@ -16,6 +24,15 @@ namespace fs = std::filesystem;
 
 namespace smelt {
 namespace {
+
+#ifdef _WIN32
+constexpr const char *kBinaryName = "smelt.exe";
+constexpr char kPathSep = ';';
+#else
+constexpr const char *kBinaryName = "smelt";
+constexpr char kPathSep = ':';
+#endif
+
 auto runSmelt(const fs::path &binary, const fs::path &dir,
               const std::vector<std::string> &args) -> bool {
   std::error_code ec;
@@ -41,19 +58,44 @@ auto onPath(const fs::path &dir) -> bool {
   const std::string all = path;
   std::size_t start = 0;
   while (start <= all.size()) {
-    const std::size_t colon = all.find(':', start);
-    const std::size_t stop = colon == std::string::npos ? all.size() : colon;
+    const std::size_t sep = all.find(kPathSep, start);
+    const std::size_t stop = sep == std::string::npos ? all.size() : sep;
     if (all.substr(start, stop - start) == dir.string())
       return true;
-    if (colon == std::string::npos)
+    if (sep == std::string::npos)
       break;
-    start = colon + 1;
+    start = sep + 1;
   }
   return false;
 }
 
+auto sameContents(const fs::path &a, const fs::path &b) -> bool {
+  std::error_code ec;
+  const auto sizeA = fs::file_size(a, ec);
+  if (ec)
+    return false;
+  const auto sizeB = fs::file_size(b, ec);
+  if (ec || sizeA != sizeB)
+    return false;
+
+  std::ifstream fa(a, std::ios::binary);
+  std::ifstream fb(b, std::ios::binary);
+  if (!fa || !fb)
+    return false;
+
+  std::istreambuf_iterator<char> ia(fa), ib(fb), end;
+  return std::equal(ia, end, ib);
+}
+
 auto getExecutablePath() -> fs::path {
-#ifdef __linux__
+#ifdef _WIN32
+  char buffer[MAX_PATH];
+  const DWORD len = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH)
+    return {};
+  return fs::path(std::string(buffer, len));
+
+#elif defined(__linux__)
   std::error_code ec;
   auto path = fs::read_symlink("/proc/self/exe", ec);
   if (ec)
@@ -108,9 +150,16 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
     std::cerr << "smelt: release build failed\n";
     return 1;
   }
-  const fs::path first = work / "smelt-a";
-  fs::copy_file(root / "build" / "release" / "smelt" / "smelt", first,
-                fs::copy_options::overwrite_existing, ec);
+  const fs::path releaseBinary =
+      root / "build" / "release" / "smelt" / kBinaryName;
+  const fs::path first = work / (std::string("smelt-a") +
+#ifdef _WIN32
+                                 ".exe"
+#else
+                                 ""
+#endif
+                                );
+  fs::copy_file(releaseBinary, first, fs::copy_options::overwrite_existing, ec);
   if (ec) {
     std::cerr << "smelt: cannot copy the release binary\n";
     return 1;
@@ -125,11 +174,11 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
     std::cerr << "smelt: self-build failed\n";
     return 1;
   }
-  const fs::path second = root / "build" / "release" / "smelt" / "smelt";
+  const fs::path second = releaseBinary;
 
   std::cout << "==> check   stage A and stage B are identical\n";
 
-  if (runProcess({"cmp", "-s", first.string(), second.string()}) != 0) {
+  if (!sameContents(first, second)) {
     std::cerr
         << "smelt: release binary does not reproduce itself; not installing\n";
     return 1;
@@ -138,8 +187,8 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
   std::cout << "==> ok      stage A and stage B are identical\n";
 
   const fs::path bin = prefix / "bin";
-  const fs::path target = bin / "smelt";
-  const fs::path tmp = bin / "smelt.tmp";
+  const fs::path target = bin / kBinaryName;
+  const fs::path tmp = bin / (std::string(kBinaryName) + ".tmp");
   fs::create_directories(bin, ec);
 
   std::cout << "==> copy    " << tmp.string() << "\n";
@@ -150,11 +199,14 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
               << "\n";
     return 1;
   }
+
+#ifndef _WIN32
   fs::permissions(tmp,
                   fs::perms::owner_all | fs::perms::group_read |
                       fs::perms::group_exec | fs::perms::others_read |
                       fs::perms::others_exec,
                   ec);
+#endif
 
   std::cout << "==> rename  " << tmp.string() << " -> " << target.string()
             << "\n";
@@ -167,18 +219,22 @@ auto installSelf(const fs::path &root, const std::filesystem::path &prefix)
   }
 
   std::cout << "installed " << target.string() << "\n";
+
+#ifndef _WIN32
   if (const auto sum = runCapture({"sha256sum", target.string()})) {
     std::cout << "sha256 " << sum->substr(0, sum->find(' ')) << "\n";
   }
+#endif
+
   if (!onPath(bin)) {
     std::cout << "note: " << bin.string()
-              << " is not on PATH; add it to your shell profile\n";
+              << " is not on PATH; add it to your PATH setting\n";
   }
   return 0;
 }
 
 auto uninstallSelf(const fs::path &prefix) -> int {
-  const fs::path target = prefix / "bin" / "smelt";
+  const fs::path target = prefix / "bin" / kBinaryName;
   std::error_code ec;
   if (!fs::exists(target, ec)) {
     std::cout << "nothing to remove at " << target.string() << "\n";
