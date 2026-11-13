@@ -1177,7 +1177,11 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
           libJobs.push_back(producer.at(lib));
       }
 
+#ifdef _WIN32
+      const fs::path out = dir / (t.name + ".exe");
+#else
       const fs::path out = dir / t.name;
+#endif
       const fs::path sig = fs::path(out.string() + ".sig");
       std::vector<std::string> args{"clang++"};
       if (profile_.debugInfo)

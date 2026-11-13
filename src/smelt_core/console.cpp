@@ -5,7 +5,17 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#define STDOUT_FILENO 1
+#define isatty _isatty
+#define fileno _fileno
+#else
 #include <unistd.h>
+#endif
+
 namespace smelt {
 Console::Console() : tty_(::isatty(STDOUT_FILENO) != 0) {}
 

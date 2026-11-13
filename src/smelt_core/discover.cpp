@@ -16,6 +16,8 @@ namespace {
 constexpr std::string_view kPlatform = "linux";
 #elif defined(__APPLE__)
 constexpr std::string_view kPlatform = "macos";
+#elif defined(_WIN32)
+constexpr std::string_view kPlatform = "windows";
 #else
 #error "Unsupported platform."
 #endif

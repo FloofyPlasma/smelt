@@ -332,8 +332,11 @@ std::vector<std::string> toolsFor(const Options &o, bool hasRemoteDeps,
 } // namespace
 
 int main(int argc, char **argv) {
+#ifdef _WIN32
+  _putenv_s("GIT_TERMINAL_PROMPT", "0");
+#else
   ::setenv("GIT_TERMINAL_PROMPT", "0", 1);
-
+#endif
   Options opts;
   std::string err;
   switch (parseArgs(argc, argv, opts, err)) {
@@ -367,11 +370,17 @@ int main(int argc, char **argv) {
   }
 
   if (opts.command == "install" || opts.command == "uninstall") {
+#ifdef _WIN32
+    std::cerr << "smelt: install and uninstall are not supported on windows";
+    return 1;
+#else
     fs::path prefix;
     if (!opts.prefix.empty()) {
       prefix = fs::path(opts.prefix);
+
     } else if (const char *home = std::getenv("HOME"); home && *home) {
       prefix = fs::path(home) / ".local";
+
     } else {
       std::cerr << "smelt: HOME is not set; use --prefix\n";
       return 2;
@@ -380,6 +389,7 @@ int main(int argc, char **argv) {
       return 2;
     return opts.command == "install" ? smelt::installSelf(root, prefix)
                                      : smelt::uninstallSelf(prefix);
+#endif
   }
 
   if (opts.command == "tree")

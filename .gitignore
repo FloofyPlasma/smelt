@@ -1,4 +1,5 @@
 compile_commands.json
+.vs/
 build/
 *.o
 *.d

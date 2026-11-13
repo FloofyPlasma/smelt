@@ -1,11 +1,227 @@
 #include "process.hpp"
-#include <fcntl.h>
 #include <iostream>
 #include <string>
+#include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <mutex>
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <vector>
+#endif
+
 namespace smelt {
+
+#ifdef _WIN32
+namespace {
+std::mutex &spawnMutex() {
+  static std::mutex m;
+  return m;
+}
+
+auto quoteArg(const std::string &a) -> std::string {
+  if (!a.empty() && a.find_first_of(" \t\"") == std::string::npos)
+    return a;
+
+  std::string out = "\"";
+  std::size_t backslashes = 0;
+  for (const char c : a) {
+    if (c == '\\') {
+      ++backslashes;
+      continue;
+    }
+    if (c == '"') {
+      out.append(backslashes * 2 + 1, '\\');
+      out += '"';
+    } else {
+      out.append(backslashes, '\\');
+      out += c;
+    }
+    backslashes = 0;
+  }
+  out.append(backslashes * 2, '\\');
+  out += '"';
+  return out;
+}
+
+auto buildCommandLine(const std::vector<std::string> &argv) -> std::string {
+  std::string cmd;
+  for (const auto &a : argv) {
+    if (!cmd.empty())
+      cmd += ' ';
+    cmd += quoteArg(a);
+  }
+  return cmd;
+}
+
+void reportSpawnError(const std::string &program) {
+  std::cerr << program << ": cannot start process (error " << GetLastError()
+            << ")\n";
+}
+} // namespace
+
+auto runProcess(const std::vector<std::string> &argv) -> int {
+  std::cout.flush();
+  std::cerr.flush();
+
+  std::string cmd = buildCommandLine(argv);
+
+  STARTUPINFOA si{};
+  si.cb = sizeof si;
+  PROCESS_INFORMATION pi{};
+
+  BOOL ok = FALSE;
+  {
+    std::lock_guard lock(spawnMutex());
+    ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0,
+                        nullptr, nullptr, &si, &pi);
+  }
+  if (!ok) {
+    reportSpawnError(argv[0]);
+    return -1;
+  }
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+
+  DWORD code = 1;
+  GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  if (code != 0)
+    std::cerr << "smelt: " << argv[0] << " exited with 0x" << std::hex << code
+              << std::dec << "\n";
+  return static_cast<int>(code);
+}
+
+auto runProcessLogged(const std::vector<std::string> &argv,
+                      const std::string &logFile) -> int {
+  std::string cmd = buildCommandLine(argv);
+
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof sa;
+  sa.bInheritHandle = TRUE;
+
+  STARTUPINFOA si{};
+  si.cb = sizeof si;
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+  PROCESS_INFORMATION pi{};
+  BOOL ok = FALSE;
+
+  {
+    std::lock_guard lock(spawnMutex());
+
+    HANDLE log =
+        CreateFileA(logFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa,
+                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (log == INVALID_HANDLE_VALUE)
+      return -1;
+
+    si.hStdOutput = log;
+    si.hStdError = log;
+
+    ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                        nullptr, &si, &pi);
+    CloseHandle(log);
+  }
+
+  if (!ok) {
+    reportSpawnError(argv[0]);
+    return -1;
+  }
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+
+  DWORD code = 1;
+  GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+  if (code != 0)
+    std::cerr << "smelt: " << argv[0] << " exited with 0x" << std::hex << code
+              << std::dec << "\n";
+  return static_cast<int>(code);
+}
+
+auto runCapture(const std::vector<std::string> &argv, const bool quietStderr)
+    -> std::optional<std::string> {
+  std::string cmd = buildCommandLine(argv);
+
+  std::cout.flush();
+  std::cerr.flush();
+
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof sa;
+  sa.bInheritHandle = TRUE;
+
+  HANDLE readPipe = nullptr;
+  HANDLE writePipe = nullptr;
+  PROCESS_INFORMATION pi{};
+  BOOL ok = FALSE;
+
+  {
+    std::lock_guard lock(spawnMutex());
+
+    if (!CreatePipe(&readPipe, &writePipe, &sa, 0))
+      return std::nullopt;
+    SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE nul = INVALID_HANDLE_VALUE;
+    HANDLE errHandle = GetStdHandle(STD_ERROR_HANDLE);
+    if (quietStderr) {
+      nul =
+          CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                      &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+      if (nul != INVALID_HANDLE_VALUE)
+        errHandle = nul;
+    }
+
+    STARTUPINFOA si{};
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = writePipe;
+    si.hStdError = errHandle;
+
+    ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                        nullptr, &si, &pi);
+
+    CloseHandle(writePipe);
+    if (nul != INVALID_HANDLE_VALUE)
+      CloseHandle(nul);
+  }
+
+  if (!ok) {
+    CloseHandle(readPipe);
+    reportSpawnError(argv[0]);
+    return std::nullopt;
+  }
+
+  std::string out;
+  char buf[4096];
+  DWORD n = 0;
+  while (ReadFile(readPipe, buf, sizeof buf, &n, nullptr) && n > 0)
+    out.append(buf, n);
+  CloseHandle(readPipe);
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+
+  DWORD code = 1;
+  GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+  if (code != 0)
+    return std::nullopt;
+  return out;
+}
+
+#else
 auto runProcess(const std::vector<std::string> &argv) -> int {
   std::vector<char *> args;
   args.reserve(argv.size() + 1);
@@ -118,6 +334,8 @@ auto runCapture(const std::vector<std::string> &argv, const bool quietStderr)
     return std::nullopt;
   return out;
 }
+
+#endif
 
 auto joinCommand(const std::vector<std::string> &argv) -> std::string {
   std::string out;
