@@ -355,6 +355,8 @@ private:
         assignList(a, t.compileOptions);
       } else if (a.key == "link") {
         assignList(a, t.link);
+      } else if (a.key == "frameworks") {
+        assignList(a, t.frameworks);
       } else if (a.key == "depends") {
         checkDepends(a, t);
       } else {
@@ -521,6 +523,8 @@ private:
         assignList(a, rules.link);
       else if (a.key == "defines")
         assignList(a, rules.defines);
+      else if (a.key == "frameworks")
+        assignList(a, rules.frameworks);
       else
         error(a.loc, "setting '" + a.key + "' is not allowed in an 'on' block");
     }

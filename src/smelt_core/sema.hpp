@@ -37,6 +37,7 @@ struct PlatformRules {
   std::vector<std::string> exclude;
   std::vector<std::string> link;
   std::vector<std::string> defines;
+  std::vector<std::string> frameworks;
 };
 
 struct TargetInfo {
@@ -55,6 +56,7 @@ struct TargetInfo {
   std::vector<std::string> defines;
   std::vector<std::string> compileOptions;
   std::vector<std::string> link;
+  std::vector<std::string> frameworks;
   std::vector<NameRef> depends;
   std::map<std::string, PlatformRules> platforms;
 };
