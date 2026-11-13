@@ -317,6 +317,12 @@ auto Builder::prepareStd() -> bool {
   if (!stdEnabled_ || stdSource_)
     return true;
 
+  if (isAppleClang()) {
+    std::cerr << "smelt: std_module needs Homebrew LLVM's clang++ first on "
+                 "PATH; Apple's clang does not provide import std\n";
+    return false;
+  }
+
   const auto major = clangMajorVersion();
   if (!major) {
     std::cerr << "smelt: std_module needs clang++ on PATH\n";

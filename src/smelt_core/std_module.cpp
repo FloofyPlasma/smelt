@@ -42,6 +42,11 @@ auto clangMajorVersion() -> std::optional<int> {
   }
 }
 
+auto isAppleClang() -> bool {
+  const auto text = clangVersionText();
+  return text && text->find("Apple clang") != std::string::npos;
+}
+
 auto findStdModule(std::string &err) -> std::optional<fs::path> {
   if (const char *env = std::getenv("SMELT_STD_MODULE"); env && *env) {
     const fs::path p = env;

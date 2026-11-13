@@ -11,6 +11,8 @@ inline constexpr int kMinClangForStdModule = 18;
 
 [[nodiscard]] auto clangVersionText() -> std::optional<std::string>;
 
+[[nodiscard]] auto isAppleClang() -> bool;
+
 [[nodiscard]] auto findStdModule(std::string &err)
     -> std::optional<std::filesystem::path>;
 } // namespace smelt
