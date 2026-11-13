@@ -52,6 +52,7 @@ auto findStdModule(std::string &err) -> std::optional<fs::path> {
   }
 
   std::vector<fs::path> candidates = {
+      "/opt/homebrew/opt/llvm/share/libc++/v1/std.cppm",
       "/usr/share/libc++/v1/std.cppm",
       "/usr/local/share/libc++/v1/std.cppm",
   };
