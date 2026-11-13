@@ -8,13 +8,13 @@
 #include "registry.hpp"
 #include "sema.hpp"
 #include "tools.hpp"
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -135,6 +135,16 @@ private:
     packages.push_back(std::move(pkg));
     const std::size_t index = packages.size() - 1;
     byDir_[root] = index;
+
+    for (auto &t : packages.back().model.targets) {
+      const auto it = t.platforms.find(std::string(hostPlatform()));
+      if (it != t.platforms.end()) {
+        t.frameworks.insert(t.frameworks.end(), it->second.frameworks.begin(),
+                            it->second.frameworks.end());
+        t.link.insert(t.link.end(), it->second.link.begin(),
+                      it->second.link.end());
+      }
+    }
 
     const std::vector<DependencyInfo> decls =
         packages[index].model.dependencies;

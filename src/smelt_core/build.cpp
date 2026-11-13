@@ -394,6 +394,11 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   u.link.insert(u.link.end(), t.link.begin(), t.link.end());
   if (const PlatformRules *plat = platformRules(t))
     u.link.insert(u.link.end(), plat->link.begin(), plat->link.end());
+
+  for (const auto &f : t.frameworks) {
+    u.link.push_back("-framework");
+    u.link.push_back(f);
+  }
 }
 
 void Builder::walkDeps(const NodeKey &n, std::set<NodeKey> &seen,
