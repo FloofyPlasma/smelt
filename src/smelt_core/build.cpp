@@ -380,7 +380,7 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   }
 
   if (const PlatformRules *plat = platformRules(t)) {
-    const std::string source = owner + " on " + std::string(currentPlatform());
+    const std::string source = owner + " on " + std::string(hostPlatform());
     for (const auto &raw : plat->defines)
       u.defines.push_back(parseDefine(raw, source, 3));
   }
@@ -425,7 +425,7 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
     u.defines.push_back(parseDefine(raw, owner, 2));
 
   if (const PlatformRules *plat = platformRules(t)) {
-    const std::string source = owner + " on " + std::string(currentPlatform());
+    const std::string source = owner + " on " + std::string(hostPlatform());
     for (const auto &raw : plat->defines)
       u.defines.push_back(parseDefine(raw, source, 2));
   }

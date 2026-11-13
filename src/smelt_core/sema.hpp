@@ -81,4 +81,6 @@ struct Model {
 
 [[nodiscard]] auto analyze(const ProjectFile &file, Diagnostics &diags)
     -> std::optional<Model>;
+
+auto hostPlatform() -> std::string_view;
 } // namespace smelt

@@ -12,16 +12,6 @@ namespace fs = std::filesystem;
 
 namespace smelt {
 namespace {
-#if defined(__linux__)
-constexpr std::string_view kPlatform = "linux";
-#elif defined(__APPLE__)
-constexpr std::string_view kPlatform = "macos";
-#elif defined(_WIN32)
-constexpr std::string_view kPlatform = "windows";
-#else
-#error "Unsupported platform."
-#endif
-
 auto isSourceFile(const fs::path &p) -> bool {
   const fs::path ext = p.extension();
   return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cppm";
@@ -40,10 +30,8 @@ auto matchesAny(const std::vector<std::string> &patterns,
 
 } // namespace
 
-auto currentPlatform() -> std::string_view { return kPlatform; }
-
 auto platformRules(const TargetInfo &t) -> const PlatformRules * {
-  const auto it = t.platforms.find(std::string(kPlatform));
+  const auto it = t.platforms.find(std::string(hostPlatform()));
   return it == t.platforms.end() ? nullptr : &it->second;
 }
 
@@ -128,7 +116,7 @@ auto discoverSources(const Model &model,
     requireMatches(t.files, "files");
     requireMatches(t.exclude, "exclude");
     if (plat) {
-      const std::string prefix = "on " + std::string(kPlatform) + " ";
+      const std::string prefix = "on " + std::string(hostPlatform()) + " ";
       requireMatches(plat->files, prefix + "files");
       requireMatches(plat->exclude, prefix + "exclude");
     }

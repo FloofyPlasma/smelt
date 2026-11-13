@@ -604,4 +604,14 @@ auto analyze(const ProjectFile &file, Diagnostics &diags)
   return checker.run(file);
 }
 
+auto hostPlatform() -> std::string_view {
+#if defined(__APPLE__)
+  return "macos";
+#elif defined(__linux__)
+  return "linux";
+#else
+  return "unknown";
+#endif
+}
+
 } // namespace smelt
