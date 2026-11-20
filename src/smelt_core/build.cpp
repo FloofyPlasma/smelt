@@ -90,6 +90,12 @@ auto readDepFile(const fs::path &depFile)
   return deps;
 }
 
+auto pcmFileName(const std::string &module) -> std::string {
+  std::string s = module;
+  std::replace(s.begin(), s.end(), ':', '-');
+  return s + ".pcm";
+}
+
 auto isStale(const fs::path &out, const fs::path &sig,
              const std::string &sigText, const std::vector<fs::path> &inputs)
     -> bool {
@@ -515,7 +521,7 @@ auto Builder::resolveImports(const NodeKey &node, const ScanRule &rule,
 
     const NodeKey owner = it->second.owner;
     if (owner == node) {
-      const fs::path pcm = outDir(node) / "modules" / (n.name + ".pcm");
+      const fs::path pcm = outDir(node) / "modules" / pcmFileName(n.name);
       flags.push_back("-fmodule-file=" + n.name + "=" + pcm.string());
       inputs.push_back(pcm);
       continue;
@@ -532,7 +538,7 @@ auto Builder::resolveImports(const NodeKey &node, const ScanRule &rule,
             "', which does not export it";
       return false;
     }
-    inputs.push_back(outDir(owner) / "modules" / (n.name + ".pcm"));
+    inputs.push_back(outDir(owner) / "modules" / pcmFileName(n.name));
   }
 
   if (crossTarget || !rule.provides.empty() || !rule.needs.empty()) {
@@ -594,11 +600,32 @@ auto Builder::scanWorkspace(const std::vector<NodeKey> &roots) -> bool {
 
   rules_ = byOutput;
 
+  const auto isInterfaceExt = [](const fs::path &p) {
+    const std::string ext = p.extension().string();
+    return ext == ".cppm" || ext == ".ccm" || ext == ".cxxm" || ext == ".c++m";
+  };
+
   for (const auto &u : units) {
     const auto rule = byOutput.find(u.output.string());
     if (rule == byOutput.end())
       continue;
     const NodeKey owner = ownerOfUnit.at(u.output.string());
+    const bool provides = !rule->second.provides.empty();
+
+    if (provides && !isInterfaceExt(u.file)) {
+      std::cerr << "smelt: '" << u.file.filename().string()
+                << "' declares module '" << rule->second.provides.front().name
+                << "' but its extension is not an interface extension "
+                   "(.cppm, .ccm, .cxxm, or .c++m); rename it\n";
+      return false;
+    }
+    if (!provides && isInterfaceExt(u.file)) {
+      std::cerr << "smelt: '" << u.file.filename().string()
+                << "' has an interface extension but declares no module; "
+                   "rename it to .cpp\n";
+      return false;
+    }
+
     for (const auto &p : rule->second.provides) {
       const auto existing = providers_.find(p.name);
       if (existing != providers_.end()) {
@@ -997,7 +1024,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
           return false;
       }
 
-      const fs::path pcm = modDir / (modName + ".pcm");
+      const fs::path pcm = modDir / pcmFileName(modName);
       const fs::path depFile = fs::path(pcm.string() + ".d");
       const fs::path sig = fs::path(pcm.string() + ".sig");
 
@@ -1081,7 +1108,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       }
 
       const fs::path modFile =
-          iface ? modDir / (scans[i].provides.front().name + ".pcm")
+          iface ? modDir / pcmFileName(scans[i].provides.front().name)
                 : file.path;
 
       // TODO: Figure out a better way to get flags.
