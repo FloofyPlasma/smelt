@@ -383,6 +383,9 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   for (const auto &d : t.privateIncludes)
     u.includes.push_back((p.root / d).lexically_normal().string());
 
+  if (!profile_.debugInfo) {
+    u.defines.push_back(parseDefine("NDEBUG", profile_.name, 1));
+  }
   for (const auto &raw : profile_.defines) {
     u.defines.push_back(parseDefine(raw, "profile " + profile_.name, 1));
   }
