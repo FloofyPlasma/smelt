@@ -231,6 +231,10 @@ auto readModules(const Json *list, std::vector<ModuleName> &out) -> bool {
 } // namespace
 
 auto mayUseModules(const fs::path &file) -> bool {
+  const std::string ext = file.extension().string();
+  if (ext == ".cppm" || ext == ".ccm" || ext == ".cxxm" || ext == ".c++m")
+    return true;
+
   std::ifstream in(file);
   std::string line;
   while (std::getline(in, line)) {

@@ -8,7 +8,7 @@
 #include <string>
 namespace smelt {
 enum class Optimization : std::uint8_t { None, Speed, Size };
-enum class TargetType : std::uint8_t { Exe, StaticLib, System };
+enum class TargetType : std::uint8_t { Exe, StaticLib, System, HeaderOnly };
 enum class WarningLevel : std::uint8_t { All, Default, None };
 
 struct ProjectInfo {
@@ -36,6 +36,8 @@ struct PlatformRules {
   std::vector<std::string> files;
   std::vector<std::string> exclude;
   std::vector<std::string> link;
+  std::vector<std::string> defines;
+  std::vector<std::string> frameworks;
 };
 
 struct TargetInfo {
@@ -54,6 +56,7 @@ struct TargetInfo {
   std::vector<std::string> defines;
   std::vector<std::string> compileOptions;
   std::vector<std::string> link;
+  std::vector<std::string> frameworks;
   std::vector<NameRef> depends;
   std::map<std::string, PlatformRules> platforms;
 };
@@ -80,4 +83,6 @@ struct Model {
 
 [[nodiscard]] auto analyze(const ProjectFile &file, Diagnostics &diags)
     -> std::optional<Model>;
+
+auto hostPlatform() -> std::string_view;
 } // namespace smelt

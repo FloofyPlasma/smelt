@@ -90,6 +90,12 @@ auto readDepFile(const fs::path &depFile)
   return deps;
 }
 
+auto pcmFileName(const std::string &module) -> std::string {
+  std::string s = module;
+  std::replace(s.begin(), s.end(), ':', '-');
+  return s + ".pcm";
+}
+
 auto isStale(const fs::path &out, const fs::path &sig,
              const std::string &sigText, const std::vector<fs::path> &inputs)
     -> bool {
@@ -200,6 +206,25 @@ Outcome runArchive(const std::vector<std::string> &args, const fs::path &out,
   return Outcome::Built;
 }
 
+Outcome runStamp(const fs::path &stamp, const std::vector<fs::path> &headers,
+                 Console &console) {
+  std::string text;
+  for (const auto &h : headers)
+    text += h.string() + " " + fileHash(h) + "\n";
+
+  if (readText(stamp) == text)
+    return Outcome::Cached;
+
+  fs::create_directories(stamp.parent_path());
+  std::ofstream out(stamp, std::ios::binary);
+  out << text;
+  if (!out) {
+    console.err("smelt: cannot write " + stamp.string());
+    return Outcome::Failed;
+  }
+  return Outcome::Built;
+}
+
 Outcome runLink(const std::vector<std::string> &args, const fs::path &out,
                 const fs::path &sig, const std::string &sigText,
                 const std::vector<fs::path> &inputs, Console &console) {
@@ -298,6 +323,12 @@ auto Builder::prepareStd() -> bool {
   if (!stdEnabled_ || stdSource_)
     return true;
 
+  if (isAppleClang()) {
+    std::cerr << "smelt: std_module needs Homebrew LLVM's clang++ first on "
+                 "PATH; Apple's clang does not provide import std\n";
+    return false;
+  }
+
   const auto major = clangMajorVersion();
   if (!major) {
     std::cerr << "smelt: std_module needs clang++ on PATH\n";
@@ -354,6 +385,12 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
     u.defines.push_back(std::move(def));
   }
 
+  if (const PlatformRules *plat = platformRules(t)) {
+    const std::string source = owner + " on " + std::string(hostPlatform());
+    for (const auto &raw : plat->defines)
+      u.defines.push_back(parseDefine(raw, source, 3));
+  }
+
   for (const auto &raw : t.publicDefines) {
     u.defines.push_back(parseDefine(raw, owner, 3));
   }
@@ -361,6 +398,13 @@ void Builder::addPublic(const NodeKey &n, Usage &u) const {
   u.options.insert(u.options.end(), t.compileOptions.begin(),
                    t.compileOptions.end());
   u.link.insert(u.link.end(), t.link.begin(), t.link.end());
+  if (const PlatformRules *plat = platformRules(t))
+    u.link.insert(u.link.end(), plat->link.begin(), plat->link.end());
+
+  for (const auto &f : t.frameworks) {
+    u.link.push_back("-framework");
+    u.link.push_back(f);
+  }
 }
 
 void Builder::walkDeps(const NodeKey &n, std::set<NodeKey> &seen,
@@ -383,6 +427,9 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   for (const auto &d : t.privateIncludes)
     u.includes.push_back((p.root / d).lexically_normal().string());
 
+  if (!profile_.debugInfo) {
+    u.defines.push_back(parseDefine("NDEBUG", profile_.name, 1));
+  }
   for (const auto &raw : profile_.defines) {
     u.defines.push_back(parseDefine(raw, "profile " + profile_.name, 1));
   }
@@ -390,6 +437,12 @@ auto Builder::requirementsOf(const NodeKey &n) const -> Usage {
   const std::string owner = p.model.project.name + ":" + t.name;
   for (const auto &raw : t.defines)
     u.defines.push_back(parseDefine(raw, owner, 2));
+
+  if (const PlatformRules *plat = platformRules(t)) {
+    const std::string source = owner + " on " + std::string(hostPlatform());
+    for (const auto &raw : plat->defines)
+      u.defines.push_back(parseDefine(raw, source, 2));
+  }
 
   switch (t.warnings) {
   case WarningLevel::All:
@@ -471,7 +524,7 @@ auto Builder::resolveImports(const NodeKey &node, const ScanRule &rule,
 
     const NodeKey owner = it->second.owner;
     if (owner == node) {
-      const fs::path pcm = outDir(node) / "modules" / (n.name + ".pcm");
+      const fs::path pcm = outDir(node) / "modules" / pcmFileName(n.name);
       flags.push_back("-fmodule-file=" + n.name + "=" + pcm.string());
       inputs.push_back(pcm);
       continue;
@@ -488,7 +541,7 @@ auto Builder::resolveImports(const NodeKey &node, const ScanRule &rule,
             "', which does not export it";
       return false;
     }
-    inputs.push_back(outDir(owner) / "modules" / (n.name + ".pcm"));
+    inputs.push_back(outDir(owner) / "modules" / pcmFileName(n.name));
   }
 
   if (crossTarget || !rule.provides.empty() || !rule.needs.empty()) {
@@ -550,11 +603,32 @@ auto Builder::scanWorkspace(const std::vector<NodeKey> &roots) -> bool {
 
   rules_ = byOutput;
 
+  const auto isInterfaceExt = [](const fs::path &p) {
+    const std::string ext = p.extension().string();
+    return ext == ".cppm" || ext == ".ccm" || ext == ".cxxm" || ext == ".c++m";
+  };
+
   for (const auto &u : units) {
     const auto rule = byOutput.find(u.output.string());
     if (rule == byOutput.end())
       continue;
     const NodeKey owner = ownerOfUnit.at(u.output.string());
+    const bool provides = !rule->second.provides.empty();
+
+    if (provides && !isInterfaceExt(u.file)) {
+      std::cerr << "smelt: '" << u.file.filename().string()
+                << "' declares module '" << rule->second.provides.front().name
+                << "' but its extension is not an interface extension "
+                   "(.cppm, .ccm, .cxxm, or .c++m); rename it\n";
+      return false;
+    }
+    if (!provides && isInterfaceExt(u.file)) {
+      std::cerr << "smelt: '" << u.file.filename().string()
+                << "' has an interface extension but declares no module; "
+                   "rename it to .cpp\n";
+      return false;
+    }
+
     for (const auto &p : rule->second.provides) {
       const auto existing = providers_.find(p.name);
       if (existing != providers_.end()) {
@@ -871,6 +945,24 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
     (void)defs;
 
     const fs::path dir = outDir(node);
+
+    if (t.type == TargetType::HeaderOnly) {
+      const fs::path stamp = dir / "stamp";
+      const auto headers = src.headers;
+
+      Job j;
+      j.label = display + ": stamp";
+      j.target = display;
+      j.endsTarget = true;
+      j.run = [=, &console = console_] {
+        return runStamp(stamp, headers, console);
+      };
+      graph.push_back(std::move(j));
+      producer[node] = graph.size() - 1;
+      outputPath[node] = stamp;
+      return;
+    }
+
     const fs::path objDir = dir / "obj";
     const fs::path modDir = dir / "modules";
 
@@ -935,7 +1027,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
           return false;
       }
 
-      const fs::path pcm = modDir / (modName + ".pcm");
+      const fs::path pcm = modDir / pcmFileName(modName);
       const fs::path depFile = fs::path(pcm.string() + ".d");
       const fs::path sig = fs::path(pcm.string() + ".sig");
 
@@ -1019,7 +1111,7 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
       }
 
       const fs::path modFile =
-          iface ? modDir / (scans[i].provides.front().name + ".pcm")
+          iface ? modDir / pcmFileName(scans[i].provides.front().name)
                 : file.path;
 
       // TODO: Figure out a better way to get flags.
@@ -1120,7 +1212,11 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
           libJobs.push_back(producer.at(lib));
       }
 
+#ifdef _WIN32
+      const fs::path out = dir / (t.name + ".exe");
+#else
       const fs::path out = dir / t.name;
+#endif
       const fs::path sig = fs::path(out.string() + ".sig");
       std::vector<std::string> args{"clang++"};
       if (profile_.debugInfo)
@@ -1153,6 +1249,13 @@ auto Builder::buildSet(const std::vector<NodeKey> &roots, std::size_t jobs)
         graph[jobIndex].next.push_back(outJob);
       }
       outputPath[node] = out;
+    }
+
+    for (const auto &dep : depsOf(node)) {
+      if (target(dep).type == TargetType::HeaderOnly && producer.count(dep)) {
+        graph[producer.at(dep)].next.push_back(outJob);
+        graph[outJob].waiting++;
+      }
     }
 
     for (const auto c : compileJobs) {

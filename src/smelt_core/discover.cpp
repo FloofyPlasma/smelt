@@ -12,11 +12,14 @@ namespace fs = std::filesystem;
 
 namespace smelt {
 namespace {
-constexpr std::string_view kPlatform = "linux";
-
 auto isSourceFile(const fs::path &p) -> bool {
   const fs::path ext = p.extension();
-  return ext == ".c" || ext == ".cpp" || ext == ".cppm";
+  return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cppm";
+}
+
+auto isHeaderFile(const fs::path &p) -> bool {
+  const fs::path ext = p.extension();
+  return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".inl";
 }
 
 auto matchesAny(const std::vector<std::string> &patterns,
@@ -25,11 +28,12 @@ auto matchesAny(const std::vector<std::string> &patterns,
                      [&](const std::string &p) { return globMatch(p, path); });
 }
 
+} // namespace
+
 auto platformRules(const TargetInfo &t) -> const PlatformRules * {
-  const auto it = t.platforms.find(std::string(kPlatform));
+  const auto it = t.platforms.find(std::string(hostPlatform()));
   return it == t.platforms.end() ? nullptr : &it->second;
 }
-} // namespace
 
 auto discoverSources(const Model &model,
                      const std::filesystem::path &projectRoot,
@@ -41,6 +45,29 @@ auto discoverSources(const Model &model,
   for (const auto &t : model.targets) {
     if (t.type == TargetType::System)
       continue;
+
+    if (t.type == TargetType::HeaderOnly) {
+      TargetSources ts;
+      ts.root = fs::canonical(projectRoot);
+      for (const auto &dir : t.publicIncludes) {
+        const fs::path base = projectRoot / dir;
+        if (!fs::is_directory(base)) {
+          diags.error(t.loc, "include directory '" + dir + "' does not exist");
+          ok = false;
+          continue;
+        }
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(base, ec), end;
+             !ec && it != end; it.increment(ec)) {
+          if (it->is_regular_file() && isHeaderFile(it->path()))
+            ts.headers.push_back(fs::canonical(it->path()));
+        }
+      }
+      std::sort(ts.headers.begin(), ts.headers.end());
+      out[t.name] = std::move(ts);
+      continue;
+    }
+
     const std::string rootRel = t.sourceDir.value_or("src/" + t.name);
     const fs::path root = projectRoot / rootRel;
 
@@ -89,7 +116,7 @@ auto discoverSources(const Model &model,
     requireMatches(t.files, "files");
     requireMatches(t.exclude, "exclude");
     if (plat) {
-      const std::string prefix = "on " + std::string(kPlatform) + " ";
+      const std::string prefix = "on " + std::string(hostPlatform()) + " ";
       requireMatches(plat->files, prefix + "files");
       requireMatches(plat->exclude, prefix + "exclude");
     }
@@ -115,7 +142,7 @@ auto discoverSources(const Model &model,
       candidates.emplace_back(canon.string(), canon);
     }
 
-    if (candidates.empty()) {
+    if (candidates.empty() && t.type != TargetType::HeaderOnly) {
       diags.error(t.loc,
                   "target '" + t.name + "' has no sources after filtering");
       ok = false;
@@ -148,9 +175,10 @@ auto discoverSources(const Model &model,
       }
       owners[key] = t.name;
 
-      ts.files.push_back(
-          {relProject, canon,
-           canon.extension() == ".cpp" || canon.extension() == ".cppm"});
+      ts.files.push_back({relProject, canon,
+                          canon.extension() == ".cc" ||
+                              canon.extension() == ".cpp" ||
+                              canon.extension() == ".cppm"});
     }
 
     out[t.name] = std::move(ts);
